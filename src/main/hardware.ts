@@ -21,6 +21,7 @@ export class Hardware {
   private status: HwStatus = { library: null, version: null, error: null, open: null }
   private dev: Device | null = null
   private keys = new Map<string, { dwf: Dwf; index: number }>()
+  private names = new Map<string, { name: string; serial: string }>()
   /** Captures run one at a time: the Scope and the meters share the analog inputs. */
   private captures: Promise<unknown> = Promise.resolve()
 
@@ -52,6 +53,7 @@ export class Hardware {
       }
     }
     list.push({ key: DEMO, name: 'Demo Device', serial: 'Simulated', link: 'SIM', busy: false, configs: 4 })
+    for (const d of list) this.names.set(d.key, { name: d.name, serial: d.serial })
     this.keys.set(DEMO, { dwf: this.sim, index: 0 })
     return list
   }
@@ -73,8 +75,21 @@ export class Hardware {
   }
 
   private need(): Device {
-    if (!this.dev) throw new Error('No device is open')
+    if (!this.dev) throw new Error('No device is open. Connect a device first.')
     return this.dev
+  }
+
+  /** The open device, for scripts and the MCP server. Throws when none is open. */
+  device(): Device {
+    return this.need()
+  }
+
+  /** Name and serial of the open device, or null. */
+  openInfo(): { key: string; name: string; serial: string } | null {
+    const key = this.status.open
+    if (!key) return null
+    const d = this.names.get(key)
+    return { key, name: d?.name ?? key, serial: d?.serial ?? key }
   }
 
   async scope(r: ScopeRequest): Promise<ScopeReply> {
