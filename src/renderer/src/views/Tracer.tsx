@@ -2,7 +2,7 @@
 // transistor tester adapter.
 import { Button, LegendItem, Note, StatusDot } from '@robcholz/geist'
 import { Play, Square, StepForward } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { si } from '../components/format'
@@ -10,6 +10,8 @@ import { Grid2, LabeledSelect, PageBar, PanelSection, SplitPage } from '../compo
 import { Plot, type Series } from '../components/Plot'
 import { UnitInput } from '../components/UnitInput'
 import { jitter, useInterval } from '../components/useInterval'
+import { hw, useHardware } from '../devices'
+import { resync } from '../hwsync'
 import { useStore } from '../store'
 
 const COLORS = ['var(--wf-c1)', 'var(--wf-c2)', 'var(--wf-c3)', 'var(--wf-c5)', 'var(--wf-c4)']
@@ -23,11 +25,15 @@ interface TracerState {
   ibStep: number
   steps: number
   hidden: number[]
+  /** Current-sense resistor between C2 and ground, in ohms. */
+  rsense: number
+  /** Base resistor from W2, in ohms. */
+  rbase: number
   set: (p: Partial<Omit<TracerState, 'set'>>) => void
 }
 
 const useTracer = create<TracerState>()(
-  persist((set) => ({ running: true, device: 'NPN', vmax: 5, ibStart: 10e-6, ibStep: 10e-6, steps: 5, hidden: [], set: (p) => set(p) }), {
+  persist((set) => ({ running: true, device: 'NPN', vmax: 5, ibStart: 10e-6, ibStep: 10e-6, steps: 5, hidden: [], rsense: 100, rbase: 100e3, set: (p) => set(p) }), {
     name: 'oscillo.tracer',
     partialize: ({ set: _s, ...r }) => r
   })
@@ -35,14 +41,83 @@ const useTracer = create<TracerState>()(
 
 /** Collector current: β·IB with saturation below ~0.2 V and the Early effect (VA = 80 V). */
 const ic = (vce: number, ib: number) => 180 * ib * (1 - Math.exp(-vce / 0.08)) * (1 + vce / 80)
+/** Largest |I| in the measured curves, at least `min`, with headroom. */
+const peak = (c: Float64Array[] | null, min: number) => Math.max(min, ...(c ?? []).map((x) => x.reduce((m, v) => Math.max(m, Math.abs(v)), 0))) * 1.15
 const diode = (v: number) => 1e-12 * (Math.exp(v / (1.8 * 0.02585)) - 1)
+
+/** Bins a captured V–I loop into n points across 0…vmax (or −vmax…0), averaging each bin. */
+function binIV(v: Float64Array, i: Float64Array, vmax: number, n: number): Float64Array {
+  const sum = new Float64Array(n)
+  const cnt = new Float64Array(n)
+  for (let k = 0; k < v.length; k++) {
+    const b = Math.round((v[k] / vmax) * (n - 1))
+    if (b >= 0 && b < n) (sum[b] += i[k]), cnt[b]++
+  }
+  const out = new Float64Array(n)
+  let last = 0
+  for (let b = 0; b < n; b++) out[b] = last = cnt[b] ? sum[b] / cnt[b] : last
+  return out
+}
+
+/**
+ * Real hardware: W1 ramps 0 → V max through the DUT into C2's sense resistor (C1 at the top, C2 at
+ * the resistor), so V = C1 − C2 and I = C2 / R. For a transistor W1 is the collector supply and W2
+ * drives the base through its resistor, one base current per curve.
+ */
+async function trace(st: TracerState, n: number): Promise<Float64Array[]> {
+  const sign = st.device === 'PNP' ? -1 : 1
+  const vmax = st.device === 'Diode' ? Math.min(st.vmax, 1) : st.vmax
+  const bjt = st.device === 'NPN' || st.device === 'PNP'
+  const curves: Float64Array[] = []
+  const f = 50
+  for (let k = 0; k < (bjt ? st.steps : 1); k++) {
+    if (bjt) await hw!.wavegen(1, { func: 'DC', frequency: 0, amplitude: 0, offset: sign * (0.65 + (st.ibStart + k * st.ibStep) * st.rbase), symmetry: 50, phase: 0 })
+    // Drive past V max so the DUT itself reaches it, despite the drop across the sense resistor.
+    const drive = Math.min(5, vmax * 1.2)
+    await hw!.wavegen(0, { func: 'Triangle', frequency: f, amplitude: (sign * drive) / 2, offset: (sign * drive) / 2, symmetry: 50, phase: 0 })
+    await new Promise((r) => setTimeout(r, 40))
+    const r = await hw!.scope({ channels: [0, 1], rate: 200 * f * 10, samples: 2000, range: { 0: 10, 1: 10 } })
+    const v = Float64Array.from(r.data[0], (x, j) => sign * (x - r.data[1][j]))
+    const i = Float64Array.from(r.data[1], (x) => sign * (x / st.rsense))
+    curves.push(Float64Array.from(binIV(v, i, vmax, n), (x) => sign * x))
+  }
+  return curves
+}
 
 export function Tracer() {
   const s = useTracer()
   const app = useStore()
-  const [, setTick] = useState(0)
+  const [tick, setTick] = useState(0)
   const live = s.running && app.running && !!app.device
-  useInterval(() => setTick((t) => t + 1), 500, live)
+  const real = useHardware()
+  useInterval(() => setTick((t) => t + 1), 500, live && !real)
+  const [measured, setMeasured] = useState<Float64Array[] | null>(null)
+  const [busy, setBusy] = useState(false)
+  // One trace per tick on real hardware; when tracing stops the generator returns to its settings.
+  useEffect(() => {
+    if (!real || !(live || tick < 0)) return
+    let alive = true
+    void (async () => {
+      try {
+        while (alive) {
+          setBusy(true)
+          const c = await trace(useTracer.getState(), 200)
+          if (alive) setMeasured(c)
+          if (!useTracer.getState().running) break
+        }
+      } catch (e) {
+        if (alive) app.toast('Trace failed', { detail: (e as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') })
+      } finally {
+        setBusy(false)
+        await Promise.all([hw?.wavegenStop(0), hw?.wavegenStop(1)]).catch(() => undefined)
+        resync()
+      }
+    })()
+    return () => {
+      alive = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [real, live, tick < 0])
 
   const N = 200
   const pnp = s.device === 'PNP'
@@ -60,17 +135,17 @@ export function Tracer() {
       unit: 'A',
       hidden: s.hidden.includes(k),
       x: vx,
-      y: Float64Array.from(vx, (v) => (pnp ? -1 : 1) * ic(Math.abs(v), s.ibStart + k * s.ibStep) * (1 + (live ? jitter(0.004) : 0)))
+      y: real ? (measured?.[k] ?? new Float64Array(N)) : Float64Array.from(vx, (v) => (pnp ? -1 : 1) * ic(Math.abs(v), s.ibStart + k * s.ibStep) * (1 + (live ? jitter(0.004) : 0)))
     }))
-    yMax = ic(vmax, s.ibStart + (s.steps - 1) * s.ibStep) * 1.15
+    yMax = real ? peak(measured, 1e-3) : ic(vmax, s.ibStart + (s.steps - 1) * s.ibStep) * 1.15
   } else if (s.device === 'Diode') {
     legend = ['1N4148']
-    series = [{ id: 'd', name: '1N4148', color: COLORS[0], unit: 'A', x: vx, y: Float64Array.from(vx, (v) => Math.min(0.05, diode(v)) * (1 + (live ? jitter(0.004) : 0))) }]
-    yMax = 0.05
+    series = [{ id: 'd', name: real ? 'Diode' : '1N4148', color: COLORS[0], unit: 'A', x: vx, y: real ? (measured?.[0] ?? new Float64Array(N)) : Float64Array.from(vx, (v) => Math.min(0.05, diode(v)) * (1 + (live ? jitter(0.004) : 0))) }]
+    yMax = real ? peak(measured, 1e-3) : 0.05
   } else {
-    legend = ['1 kΩ']
-    series = [{ id: 'r', name: '1 kΩ', color: COLORS[0], unit: 'A', x: vx, y: Float64Array.from(vx, (v) => (v / 1000) * (1 + (live ? jitter(0.002) : 0))) }]
-    yMax = vmax / 1000
+    legend = [real ? 'Resistor' : '1 kΩ']
+    series = [{ id: 'r', name: legend[0], color: COLORS[0], unit: 'A', x: vx, y: real ? (measured?.[0] ?? new Float64Array(N)) : Float64Array.from(vx, (v) => (v / 1000) * (1 + (live ? jitter(0.002) : 0))) }]
+    yMax = real ? peak(measured, 1e-3) : vmax / 1000
   }
   const nice = (v: number) => {
     const p = 10 ** Math.floor(Math.log10(v))
@@ -88,8 +163,8 @@ export function Tracer() {
   return (
     <SplitPage
       bar={
-        <PageBar title="Curve Tracer" status={<StatusDot state={live ? 'READY' : 'QUEUED'} label={live ? 'Tracing' : 'Stopped'} />}>
-          <Button size="small" type="secondary" prefix={<StepForward size={16} />} onClick={() => { s.set({ running: false }); setTick((t) => t + 1) }}>
+        <PageBar title="Curve Tracer" status={<StatusDot state={live || busy ? 'READY' : 'QUEUED'} label={live || busy ? 'Tracing' : 'Stopped'} />}>
+          <Button size="small" type="secondary" prefix={<StepForward size={16} />} onClick={() => { if (!app.device) return app.toast('No device connected', { detail: 'Connect a device, then press Single.' }); s.set({ running: false }); setTick((t) => (real ? -Math.abs(t) - 1 : t + 1)) }}>
             Single
           </Button>
           <Button size="small" prefix={live ? <Square size={16} /> : <Play size={16} />} onClick={run} tooltipKeys={['Space']}>
@@ -110,8 +185,12 @@ export function Tracer() {
             </Grid2>
           </PanelSection>
           <PanelSection title="Adapter">
+            <Grid2>
+              <UnitInput label="Sense Resistor" value={s.rsense} suffix="Ω" min={1} max={100e3} onCommit={(rsense) => s.set({ rsense })} />
+              <UnitInput label="Base Resistor" value={s.rbase} scale={1e3} suffix="kΩ" min={1e3} max={10e6} disabled={!bjt} onCommit={(rbase) => s.set({ rbase })} />
+            </Grid2>
             <Note type="secondary" size="small">
-              Uses Scope, both Wavegen channels, Supplies and Static I/O through the transistor tester adapter.
+              W1 drives the DUT, C1 reads its top and C2 the sense resistor to ground. For transistors, W2 drives the base through the base resistor.
             </Note>
           </PanelSection>
         </>
@@ -129,7 +208,7 @@ export function Tracer() {
         ariaLabel="IV curves"
         height="calc(460px + max(0px, (100vh - 900px) * 0.8))"
       />
-      {bjt && (
+      {bjt && !real && (
         <span className="text-[13px] tabular-nums text-gray-900">
           β ≈ {Math.round(ic(Math.min(2, vmax), s.ibStart) / s.ibStart)} at VCE 2 V · Early voltage ≈ 80 V
         </span>

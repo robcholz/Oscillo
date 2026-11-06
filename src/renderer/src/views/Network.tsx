@@ -12,6 +12,8 @@ import { Plot, type Series } from '../components/Plot'
 import { UnitInput } from '../components/UnitInput'
 import { useInterval } from '../components/useInterval'
 import { lowPass, mag, phaseDeg, sweep } from '../sim/network'
+import { useHardware } from '../devices'
+import { cdiv, respond, useSweep } from '../hwsync'
 import { useStore } from '../store'
 
 const TABS = ['Bode', 'Nyquist', 'Nichols', 'Time', 'Data'] as const
@@ -87,12 +89,27 @@ export function Network() {
   const live = s.running && app.running && !!app.device
   const log = s.scale === 'Logarithmic'
 
+  const real = useHardware()
+  const [single, setSingle] = useState(false)
   // One sweep step per tick; a finished sweep restarts while running.
-  useInterval(() => setDone((d) => (d >= s.steps ? 1 : d + 1)), Math.max(15, 2400 / s.steps), live)
+  useInterval(() => setDone((d) => (d >= s.steps ? 1 : d + 1)), Math.max(15, 2400 / s.steps), live && !real)
 
   const freqs = useMemo(() => sweep(s.start, s.stop, s.steps, log), [s.start, s.stop, s.steps, log])
-  const H = useMemo(() => freqs.map((f) => lowPass(f)), [freqs])
-  const n = Math.min(done, s.steps)
+  // A real device: the generator drives the circuit; the response is C2 over C1 (or C1 over C2).
+  const gen = s.source === 'Wavegen 2' ? 1 : 0
+  const hwSweep = useSweep(
+    real && (live || single),
+    freqs,
+    async (f) => {
+      const [c1, c2] = await respond(f, { amp: s.amp, offset: s.offset, periods: s.periods, settle: s.settle, gen })
+      return s.reference === 'Channel 2' ? cdiv(c1, c2) : cdiv(c2, c1)
+    },
+    { gen, once: single && !live, onDone: () => setSingle(false) }
+  )
+  const simH = useMemo(() => freqs.map((f) => lowPass(f)), [freqs])
+  const H = real ? hwSweep.pts : simH
+  const n = real ? hwSweep.done : Math.min(done, s.steps)
+  const at = (f: number) => (real ? (H[freqs.reduce((b, x, i) => (Math.abs(x - f) < Math.abs(freqs[b] - f) ? i : b), 0)] ?? { re: 0, im: 0 }) : lowPass(f))
   const fx = Float64Array.from(freqs.slice(0, n))
   const toMag = (h: (typeof H)[number]) => (s.units === 'dB' ? 20 * Math.log10(mag(h) * s.gain) : mag(h) * s.gain)
   const magY = Float64Array.from(H.slice(0, n), toMag)
@@ -264,7 +281,7 @@ export function Network() {
     <SplitPage
       bar={
         <PageBar title="Network Analyzer" status={<StatusDot state={live ? (n < s.steps ? 'BUILDING' : 'READY') : 'QUEUED'} label={live ? (n < s.steps ? 'Sweeping' : 'Sweep Done') : 'Stopped'} />}>
-          <Button size="small" type="secondary" prefix={<StepForward size={16} />} onClick={() => { if (!app.device) return toast('No device connected', { detail: 'Connect a device, then press Single.' }); s.set({ running: false }); setDone(s.steps); toast('Single sweep done', { detail: `${s.steps} steps, ${si(s.start, 'Hz')} to ${si(s.stop, 'Hz')}.` }) }}>
+          <Button size="small" type="secondary" prefix={<StepForward size={16} />} onClick={() => { if (!app.device) return toast('No device connected', { detail: 'Connect a device, then press Single.' }); s.set({ running: false }); if (real) { setSingle(true); return toast('Single sweep started', { detail: `${s.steps} steps, ${si(s.start, 'Hz')} to ${si(s.stop, 'Hz')}.` }) } setDone(s.steps); toast('Single sweep done', { detail: `${s.steps} steps, ${si(s.start, 'Hz')} to ${si(s.stop, 'Hz')}.` }) }}>
             Single
           </Button>
           <Button size="small" prefix={live ? <Square size={16} /> : <Play size={16} />} onClick={run} tooltipKeys={['Space']}>
@@ -328,7 +345,7 @@ export function Network() {
             { key: 'm', title: 'Magnitude', align: 'right' },
             { key: 'p', title: 'Phase', align: 'right' }
           ]}
-          rows={cursors.map((f, i) => ({ c: 'X' + (i + 1), f: si(f, 'Hz', 4), m: fixed(20 * Math.log10(mag(lowPass(f)) * s.gain), 'dB', 2), p: fixed(phaseDeg(lowPass(f)) + s.phaseOffset, '°', 1) }))}
+          rows={cursors.map((f, i) => ({ c: 'X' + (i + 1), f: si(f, 'Hz', 4), m: fixed(20 * Math.log10(mag(at(f)) * s.gain), 'dB', 2), p: fixed(phaseDeg(at(f)) + s.phaseOffset, '°', 1) }))}
         />
       )}
       <div className="flex items-center gap-3">

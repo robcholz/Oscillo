@@ -12,6 +12,8 @@ import { Plot, type Series } from '../components/Plot'
 import { UnitInput } from '../components/UnitInput'
 import { useInterval } from '../components/useInterval'
 import { analyze, metrics, testSignal, toDbv, WINDOWS, type WindowName } from '../sim/spectrum'
+import { useHardware } from '../devices'
+import { useCapture } from '../hwsync'
 import { useStore } from '../store'
 
 const FS = 10000
@@ -105,9 +107,12 @@ export function Spectrum() {
   const hold = useRef<{ max?: Float64Array; min?: Float64Array; avg?: Float64Array; n: number; ref?: Float64Array }>({ n: 0 })
   const live = s.running && app.running && !!app.device
 
-  useInterval(() => setFrame((x) => x + 1), 300, live)
+  const real = useHardware()
+  useInterval(() => setFrame((x) => x + 1), 300, live && !real)
+  // A real device: Channel 1 captured at FS; the Demo Device analyses a test signal.
+  const cap = useCapture(real && live ? { channels: [0], rate: FS, samples: N, range: { 0: s.c1Range } } : null)
 
-  const time = useMemo(() => testSignal(N, FS, (frame * 0.37) % 1), [frame])
+  const time = useMemo(() => (real ? (cap?.data[0] ?? new Float64Array(N)) : testSignal(N, FS, (frame * 0.37) % 1)), [real, cap, frame])
   const spec = useMemo(() => analyze(time, FS, s.window, s.beta), [time, s.window, s.beta])
   const m = useMemo(() => metrics(spec), [spec])
 

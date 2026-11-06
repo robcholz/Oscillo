@@ -12,6 +12,8 @@ import { Plot, type Series } from '../components/Plot'
 import { UnitInput } from '../components/UnitInput'
 import { jitter, useInterval } from '../components/useInterval'
 import { impedance, mag, phaseDeg, sweep, type Complex } from '../sim/network'
+import { useHardware } from '../devices'
+import { cdiv, cscale, csub, respond, useSweep } from '../hwsync'
 import { useStore } from '../store'
 
 const TABS = ['|Z| and Phase', 'R and X', 'Cs and Ls', 'Q and D', 'Smith', 'Data'] as const
@@ -129,11 +131,20 @@ export function Impedance() {
   const live = s.running && app.running && !!app.device
   const log = s.scale === 'Logarithmic'
 
-  useInterval(() => (s.mode === 'Sweep' ? setDone((d) => (d >= s.steps ? 1 : d + 1)) : setTick((t) => t + 1)), s.mode === 'Sweep' ? Math.max(10, 2400 / s.steps) : 400, live)
+  const real = useHardware()
+  useInterval(() => (s.mode === 'Sweep' ? setDone((d) => (d >= s.steps ? 1 : d + 1)) : setTick((t) => t + 1)), s.mode === 'Sweep' ? Math.max(10, 2400 / s.steps) : 400, live && !real)
 
   const freqs = useMemo(() => sweep(s.start, s.stop, s.steps, log), [s.start, s.stop, s.steps, log])
-  const Z = useMemo(() => freqs.map((f) => impedance(f)), [freqs])
-  const n = Math.min(done, s.steps)
+  // A real device: W1 drives C1, then the DUT, then C2 across the reference resistor to ground,
+  // so Z = R × (C1 − C2) / C2.
+  const meterFreqs = useMemo(() => [s.freq], [s.freq])
+  const hwSweep = useSweep(real && live, s.mode === 'Meter' ? meterFreqs : freqs, async (f) => {
+    const [v1, v2] = await respond(f, { amp: s.amp, offset: s.offset, periods: s.periods, settle: 0 })
+    return cscale(cdiv(csub(v1, v2), v2), s.reference)
+  })
+  const simZ = useMemo(() => freqs.map((f) => impedance(f)), [freqs])
+  const Z = real && s.mode === 'Sweep' ? hwSweep.pts : simZ
+  const n = real && s.mode === 'Sweep' ? hwSweep.done : Math.min(done, s.steps)
   const D = Z.slice(0, n).map((z, i) => derived(z, freqs[i]))
   const fx = Float64Array.from(freqs.slice(0, n))
   const [x0, x1] = view ?? [s.start, s.stop]
@@ -141,9 +152,10 @@ export function Impedance() {
 
   // Meter: one frequency, small noise per reading.
   const meterZ = useMemo(() => {
+    if (real) return hwSweep.pts[0] ?? { re: 0, im: 0 }
     const z = impedance(s.freq)
     return { re: z.re * (1 + jitter(0.0008)), im: z.im * (1 + jitter(0.0008)) }
-  }, [s.freq, tick])
+  }, [s.freq, tick, real, hwSweep.pts])
   const m = derived(s.mode === 'Meter' ? meterZ : Z[n - 1] ?? meterZ, s.mode === 'Meter' ? s.freq : freqs[n - 1])
 
   const run = () => {

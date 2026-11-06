@@ -1,11 +1,13 @@
 // Keeps real hardware in step with the instrument settings, and polls what the device reports back.
 // The Demo Device keeps the renderer's own simulations; everything here runs only on real hardware,
 // except the monitor (temperature, USB power), which the simulated device answers too.
+import { useEffect, useRef, useState } from 'react'
 import { create } from 'zustand'
-import type { Monitor, WaveRequest } from '../../shared/hw'
+import type { Monitor, ScopeReply, ScopeRequest, WaveRequest } from '../../shared/hw'
 import { deviceById, hw } from './devices'
 import { useStore } from './store'
 import type { WaveType } from './sim/wave'
+import type { Complex } from './sim/network'
 import type { Reading } from './views/meters'
 
 interface HwLive {
@@ -114,6 +116,10 @@ export function startHwSync(): void {
   }, 500)
 }
 
+const resyncs: (() => void)[] = []
+/** Pushes every followed setting again, e.g. after an analyzer borrowed the generator. */
+export const resync = (): void => resyncs.forEach((f) => f())
+
 type Sub = { subscribe: (fn: () => void) => () => void }
 /**
  * Pushes `read()` to the device with `push` whenever it changes, and again after connecting, while
@@ -137,6 +143,131 @@ export function follow<T>(stores: Sub[], read: () => T, push: (v: T) => Promise<
     push(v).catch((e: Error) => app.toast(`Could not update ${what}`, { detail: e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') }))
   }
   for (const s of [useStore, ...stores]) s.subscribe(run)
+  resyncs.push(() => {
+    last = ''
+    run()
+  })
   // The device list arrives after launch; check again once it has.
   setTimeout(run, 0)
 }
+
+/**
+ * Captures from the scope inputs back to back while `req` is set, and returns the latest capture.
+ * Failures show once as a toast, then capturing stops until `req` changes.
+ */
+export function useCapture(req: ScopeRequest | null): ScopeReply | null {
+  const [cap, setCap] = useState<ScopeReply | null>(null)
+  const key = req ? JSON.stringify(req) : null
+  const latest = useRef(req)
+  latest.current = req
+  useEffect(() => {
+    if (!key || !hw) return
+    let alive = true
+    void (async () => {
+      while (alive) {
+        try {
+          const r = await hw!.scope(latest.current!)
+          if (alive) setCap(r)
+        } catch (e) {
+          if (alive) useStore.getState().toast('Capture failed', { detail: (e as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') })
+          return
+        }
+        await new Promise((r) => setTimeout(r, 50))
+      }
+    })()
+    return () => {
+      alive = false
+    }
+  }, [key])
+  return cap
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+/** Amplitude and phase of `v` at frequency f, over a whole number of periods (single-bin DFT). */
+export function tone(v: ArrayLike<number>, rate: number, f: number): Complex {
+  const periods = Math.floor((v.length * f) / rate)
+  const n = periods >= 1 ? Math.round((periods * rate) / f) : v.length
+  let re = 0
+  let im = 0
+  const w = (2 * Math.PI * f) / rate
+  for (let i = 0; i < n; i++) {
+    re += v[i] * Math.cos(w * i)
+    im -= v[i] * Math.sin(w * i)
+  }
+  return { re: (2 * re) / n, im: (2 * im) / n }
+}
+
+export interface Stimulus {
+  amp: number
+  offset: number
+  /** Periods to capture at each frequency. */
+  periods: number
+  /** Extra wait after changing frequency, in seconds. */
+  settle: number
+  /** Generator channel (0 = W1). */
+  gen?: number
+}
+
+/** Drives a sine at f on the generator, then captures C1 and C2 and returns each one's tone at f. */
+export async function respond(f: number, st: Stimulus): Promise<[Complex, Complex]> {
+  const samples = 4096
+  const rate = Math.min(100e6, Math.max(1e3, (f * samples) / Math.max(1, st.periods)))
+  await hw!.wavegen(st.gen ?? 0, { func: 'Sine', frequency: f, amplitude: st.amp, offset: st.offset, symmetry: 50, phase: 0 })
+  await sleep(Math.min(1000, st.settle * 1000 + (2 / f) * 1000))
+  const r = await hw!.scope({ channels: [0, 1], rate, samples, range: { 0: Math.max(1, st.amp * 2.5), 1: Math.max(1, st.amp * 2.5) } })
+  return [tone(r.data[0], r.rate, f), tone(r.data[1], r.rate, f)]
+}
+
+/**
+ * Sweeps `freqs` on real hardware while `run`, restarting when done, like the analyzers' own sweep.
+ * `fn` turns each frequency into a point. When the sweep stops, the generator goes back to its
+ * Wavegen settings.
+ */
+export function useSweep(run: boolean, freqs: number[], fn: (f: number) => Promise<Complex>, opts: { gen?: number; once?: boolean; onDone?: () => void } = {}): { pts: Complex[]; done: number } {
+  const [state, setState] = useState<{ pts: Complex[]; done: number }>({ pts: [], done: 0 })
+  const ref = useRef(fn)
+  ref.current = fn
+  const done = useRef(opts.onDone)
+  done.current = opts.onDone
+  const key = run && hw ? JSON.stringify([freqs, opts.gen ?? 0, !!opts.once]) : null
+  useEffect(() => {
+    if (!key) return
+    let alive = true
+    void (async () => {
+      try {
+        while (alive) {
+          const pts: Complex[] = []
+          setState({ pts, done: 0 })
+          for (const f of freqs) {
+            if (!alive) break
+            pts.push(await ref.current(f))
+            if (alive) setState({ pts: pts.slice(), done: pts.length })
+          }
+          if (opts.once) {
+            if (alive) done.current?.()
+            break
+          }
+        }
+      } catch (e) {
+        if (alive) useStore.getState().toast('Sweep failed', { detail: (e as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') })
+      } finally {
+        await hw?.wavegenStop(opts.gen ?? 0).catch(() => undefined)
+        resync()
+      }
+    })()
+    return () => {
+      alive = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
+  return state
+}
+
+/** Complex helpers for the analyzers. */
+export const cdiv = (a: Complex, b: Complex): Complex => {
+  const d = b.re * b.re + b.im * b.im || 1e-30
+  return { re: (a.re * b.re + a.im * b.im) / d, im: (a.im * b.re - a.re * b.im) / d }
+}
+export const csub = (a: Complex, b: Complex): Complex => ({ re: a.re - b.re, im: a.im - b.im })
+export const cscale = (a: Complex, k: number): Complex => ({ re: a.re * k, im: a.im * k })
