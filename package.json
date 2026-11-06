@@ -17,6 +17,7 @@
     "screenshot": "electron-vite build && xvfb-run -a node scripts/screenshot.mjs screenshots"
   },
   "devDependencies": {
+    "@oscillo/dwf": "file:libs/dwf",
     "@robcholz/geist": "file:geist",
     "@tailwindcss/vite": "^4.3.4",
     "@types/node": "^22.20.5",
@@ -37,5 +38,8 @@
     "vite": "^8.3.5",
     "vitest": "^5.1.0",
     "zustand": "^5.0.16"
+  },
+  "dependencies": {
+    "koffi": "^3.3.7"
   }
 }

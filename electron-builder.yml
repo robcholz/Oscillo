@@ -4,6 +4,9 @@ productName: Oscillo
 copyright: Copyright © 2026 Finn Sheng
 directories:
   buildResources: build
+# koffi loads a native .node file, which cannot run from inside the asar archive.
+asarUnpack:
+  - node_modules/koffi/**
 files:
   - out/**/*
   - package.json

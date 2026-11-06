@@ -9,5 +9,5 @@
     "types": ["node", "electron-vite/node"],
     "outDir": "out/tsc-node"
   },
-  "include": ["electron.vite.config.ts", "src/main/**/*", "src/preload/**/*", "src/shared/**/*"]
+  "include": ["electron.vite.config.ts", "src/main/**/*", "src/preload/**/*", "src/shared/**/*", "libs/*/src/**/*", "libs/*/tests/**/*"]
 }
