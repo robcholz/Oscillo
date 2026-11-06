@@ -1,0 +1,16 @@
+appId: com.robcholz.oscillo
+compression: maximum
+productName: Oscillo
+copyright: Copyright © 2026 Finn Sheng
+directories:
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+mac:
+  category: public.app-category.developer-tools
+  target: dmg
+  electronLanguages: [en]
+  identity: null
+dmg:
+  artifactName: Oscillo-${version}.${ext}
