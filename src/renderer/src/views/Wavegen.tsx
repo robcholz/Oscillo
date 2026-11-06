@@ -350,7 +350,7 @@ export function Wavegen() {
   )
 }
 
-// Real hardware follows the generator settings, and stops when instruments stop.
+// The device follows the generator settings, and stops when instruments stop.
 for (const i of [0, 1] as const) {
   follow(
     [useWavegen],
@@ -370,6 +370,7 @@ for (const i of [0, 1] as const) {
       }
     },
     ({ c, on, x }) => pushWave(i, c, on, x),
-    `Wavegen Channel ${i + 1}`
+    `Wavegen Channel ${i + 1}`,
+    { name: `Wavegen ${i + 1}`, on: ({ c, on }) => on && c.run && c.out }
   )
 }

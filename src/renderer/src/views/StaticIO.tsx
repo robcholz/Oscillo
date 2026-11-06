@@ -1,7 +1,7 @@
 // Static I/O (board: StaticIO). DIO 7–0 as per-bit LEDs, buttons and switches; DIO 15–8 as an 8-bit
 // output shown as a slider, progress bar, bits or 7-segment digits.
 import { Button, Description, Material, Note, Progress, Select, Slider, StatusDot, Toggle } from '@robcholz/geist'
-import { CircleDot, Minus, Plus, RefreshCw } from 'lucide-react'
+import { CircleDot, Minus, Play, Plus, RefreshCw, Square } from 'lucide-react'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { PageBar, ScrollPage } from '../components/Page'
@@ -21,14 +21,20 @@ interface IOState {
   hi: number
   /** The DIO button held down, if any. */
   pressed: number | null
+  /** Outputs drive the pins only while running. Starts stopped every launch, so nothing drives a circuit unasked. */
+  running: boolean
   set: (p: Partial<Omit<IOState, 'set'>>) => void
 }
 
 const initial = { widgets: ['LED', 'LED', 'LED', 'LED', 'Button', 'Button', 'Switch', 'Switch'] as Widget[], switches: Array(8).fill(false) as boolean[], drive: 'Push-Pull', loMode: 'Bit I/O' as Mode, hiMode: 'Slider' as Mode, hi: 0x5a }
-const useIO = create<IOState>()(persist((set) => ({ ...initial, pressed: null, set: (p) => set(p) }), { name: 'oscillo.static-io', partialize: ({ set: _s, pressed: _p, ...r }) => r }))
+const useIO = create<IOState>()(persist((set) => ({ ...initial, pressed: null, running: false, set: (p) => set(p) }), { name: 'oscillo.static-io', partialize: ({ set: _s, pressed: _p, running: _r, ...r }) => r }))
 
-/** Output enables and levels: DIO 15–8 always drive; DIO 7–0 drive where the widget is a switch or button. */
+/**
+ * Output enables and levels while running: DIO 15–8 drive; DIO 7–0 drive where the widget is a switch
+ * or button. Stopped (or with every instrument stopped), no pin is driven.
+ */
 function outputs(s: IOState): { mask: number; value: number } {
+  if (!s.running || !useStore.getState().running) return { mask: 0, value: 0 }
   let mask = 0xff00
   let value = (s.hi & 0xff) << 8
   s.widgets.forEach((w, i) => {
@@ -39,8 +45,8 @@ function outputs(s: IOState): { mask: number; value: number } {
   return { mask, value }
 }
 
-// Real hardware follows the switches, buttons and the DIO 15–8 value.
-follow([useIO], () => outputs(useIO.getState()), ({ mask, value }) => pushDio(mask, value), 'Static I/O')
+// The device follows the switches, buttons and the DIO 15–8 value.
+follow([useIO], () => outputs(useIO.getState()), ({ mask, value }) => pushDio(mask, value), 'Static I/O', { name: 'Static I/O', on: ({ mask }) => mask !== 0 })
 
 // Segments a–g as [left, top, width, height] in a 36 × 60 cell.
 const SEG: [number, number, number, number][] = [
@@ -73,7 +79,7 @@ const hex2 = (v: number) => v.toString(16).toUpperCase().padStart(2, '0')
 export function StaticIO() {
   const s = useIO()
   const app = useStore()
-  const live = app.running && !!app.device
+  const live = s.running && app.running && !!app.device
   const pressed = s.pressed
   const setPressed = (pressed: number | null) => s.set({ pressed })
   const dio = useHwLive((h) => h.dio)
@@ -86,6 +92,13 @@ export function StaticIO() {
     return s.switches[i] ? 1 : 0
   }
   const lo = Array.from({ length: 8 }, (_, i) => level(i)).reduce((a, b, i) => a | (b << i), 0)
+
+  const run = () => {
+    if (!app.device) return app.toast('No device connected', { detail: 'Connect a device, then press Run.' })
+    if (!app.running) app.setRunning(true)
+    s.set({ running: !live })
+    app.toast(live ? 'Static I/O stopped, pins released' : 'Static I/O driving its outputs')
+  }
 
   const step = (d: number) => s.set({ hi: Math.max(0, Math.min(255, s.hi + d)) })
   const modeSelect = (label: string, value: Mode, on: (m: Mode) => void) => (
@@ -108,7 +121,7 @@ export function StaticIO() {
     <ScrollPage
       className="flex flex-col gap-4"
       bar={
-        <PageBar title="Static I/O" status={<StatusDot state={live ? 'READY' : 'QUEUED'} label={live ? 'Live' : 'Stopped'} />}>
+        <PageBar title="Static I/O" status={<StatusDot state={live ? 'READY' : 'QUEUED'} label={live ? 'Running' : 'Stopped'} />}>
           <Button
             size="small"
             type="secondary"
@@ -119,6 +132,9 @@ export function StaticIO() {
             }}
           >
             Reset All
+          </Button>
+          <Button size="small" prefix={live ? <Square size={16} /> : <Play size={16} />} onClick={run} tooltipKeys={['Space']}>
+            {live ? 'Stop' : 'Run'}
           </Button>
         </PageBar>
       }
@@ -244,7 +260,7 @@ export function StaticIO() {
         </div>
       </Material>
       <Note type="secondary" size="small">
-        Analog Discovery 3 has 16 digital I/O pins. Pins used by Patterns, Logic or Protocol show as Busy here.
+        Outputs drive the pins only while Static I/O runs. Stop it before driving the same pins from Patterns or Protocol.
       </Note>
     </ScrollPage>
   )

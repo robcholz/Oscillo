@@ -5,7 +5,7 @@ import type { ReactNode } from 'react'
 import { ModelContextProtocolIcon, TypeScriptIcon } from '../components/icons'
 import { CONFIGS, useDevice } from '../devices'
 import type { PageId } from '../routes'
-import { useHwLive } from '../hwsync'
+import { useActivity, useHwLive } from '../hwsync'
 import { useStore } from '../store'
 import { useMcpSummary } from '../views/mcp-store'
 
@@ -42,6 +42,9 @@ export function StatusBar() {
   const temp = mon && Number.isFinite(mon.temperature) ? `${Math.round(mon.temperature)} °C` : '– °C'
   const power = mon && Number.isFinite(mon.usb.volts * mon.usb.amps) ? `${(mon.usb.volts * mon.usb.amps).toFixed(2)} W` : '– W'
   const running = s.running && !!dev
+  const active = useActivity((a) => Object.keys(a.on).filter((k) => a.on[k]).sort().join(', '))
+  const n = dev && active ? active.split(', ').length : 0
+  const count = n === 0 ? 'Nothing active' : n === 1 ? '1 instrument' : `${n} instruments`
   return (
     <footer
       role="status"
@@ -60,9 +63,9 @@ export function StatusBar() {
         </Item>
         <Sep />
         <Item
-          tip={s.running ? 'Stop all instruments' : 'Run all instruments'}
+          tip={s.running ? (n ? `Active: ${active}. Stop all instruments` : 'Stop all instruments') : 'Run all instruments'}
           keys={['Space']}
-          label={running ? 'Running, 4 instruments. Stop all' : 'Stopped. Run all'}
+          label={running ? `Running, ${count}. Stop all` : 'Stopped. Run all'}
           onClick={() => {
             s.setRunning(!s.running)
             s.toast(s.running ? 'All instruments stopped' : 'All instruments running')
@@ -70,7 +73,7 @@ export function StatusBar() {
         >
           <span className={cn('size-2 flex-none rounded-full', running ? 'bg-blue-700 motion-safe:animate-[wf-pulse_1.6s_ease-out_infinite]' : 'bg-gray-600')} />
           <b className="font-medium text-gray-1000">{running ? 'Running' : 'Stopped'}</b>
-          <span>{running ? '4 instruments' : 'All instruments idle'}</span>
+          <span>{n ? count : running ? 'Nothing active' : 'All instruments idle'}</span>
         </Item>
         {dev && (
           <>

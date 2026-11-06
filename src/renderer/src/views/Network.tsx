@@ -11,7 +11,7 @@ import { Grid2, LabeledSelect, PageBar, PanelSection, SplitPage } from '../compo
 import { Plot, type Series } from '../components/Plot'
 import { UnitInput } from '../components/UnitInput'
 import { mag, phaseDeg, sweep } from '../../../shared/dsp/network'
-import { cdiv, respond, useSweep } from '../hwsync'
+import { cdiv, respond, useSweep, useActive } from '../hwsync'
 import { publish, saveImage, saveTable, type Table as DataTable } from '../files'
 import { toggleLoggingFor, useLoggingOf } from '../logging'
 import { useStore } from '../store'
@@ -90,6 +90,7 @@ export function Network() {
   const log = s.scale === 'Logarithmic'
 
   const [single, setSingle] = useState(false)
+  useActive('Network Analyzer', live || single)
 
   const freqs = useMemo(() => sweep(s.start, s.stop, s.steps, log), [s.start, s.stop, s.steps, log])
   // The generator drives the circuit; the response is C2 over C1 (or C1 over C2).

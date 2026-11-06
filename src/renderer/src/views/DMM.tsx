@@ -10,6 +10,7 @@ import { si } from '../components/format'
 import { useInterval } from '../components/useInterval'
 import { hw, useDevice } from '../devices'
 import { useStore } from '../store'
+import { useActive } from '../hwsync'
 
 const FUNCTIONS = ['DC Voltage', 'AC Voltage', 'DC Current', 'AC Current', 'Resistance', 'Continuity', 'Diode', 'Temperature']
 const RANGES = ['Auto', '100 mV', '1 V', '10 V', '100 V']
@@ -65,6 +66,7 @@ export function DMM() {
   const [rel, setRel] = useState<number | null>(null)
   const [st, setSt] = useState<Stats>(empty)
   const live = d.running && app.running && !!app.device && !hold
+  useActive('DMM', live)
   const unit = UNIT[d.fn]
   const digits = d.res === '5½ Digits' ? 6 : 5
   const stRef = useRef(st)

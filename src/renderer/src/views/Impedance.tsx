@@ -11,7 +11,7 @@ import { Grid2, LabeledSelect, PageBar, PanelSection, SplitPage } from '../compo
 import { Plot, type Series } from '../components/Plot'
 import { UnitInput } from '../components/UnitInput'
 import { mag, phaseDeg, sweep, type Complex } from '../../../shared/dsp/network'
-import { cdiv, cscale, csub, respond, useSweep } from '../hwsync'
+import { cdiv, cscale, csub, respond, useSweep, useActive } from '../hwsync'
 import { publish, saveImage, saveTable, type Table as DataTable } from '../files'
 import { toggleLoggingFor, useLoggingOf } from '../logging'
 import { useStore } from '../store'
@@ -149,6 +149,7 @@ export function Impedance() {
   const [labels, setLabels] = useState<{ f: number; text: string }[]>([])
   const [dialog, setDialog] = useState<null | { title: string; fields: FormField[]; submitLabel: string; onSubmit: (v: Record<string, string>) => void }>(null)
   const live = s.running && app.running && !!app.device
+  useActive('Impedance Analyzer', live || single)
   const log = s.scale === 'Logarithmic'
 
 

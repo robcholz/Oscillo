@@ -10,7 +10,7 @@ import { Grid2, LabeledSelect, PageBar, PanelSection, SplitPage } from '../compo
 import { Plot, type Series } from '../components/Plot'
 import { UnitInput } from '../components/UnitInput'
 import { hw } from '../devices'
-import { resync } from '../hwsync'
+import { resync, useActive } from '../hwsync'
 import { useStore } from '../store'
 
 const COLORS = ['var(--wf-c1)', 'var(--wf-c2)', 'var(--wf-c3)', 'var(--wf-c5)', 'var(--wf-c4)']
@@ -85,6 +85,7 @@ export function Tracer() {
   const app = useStore()
   const [tick, setTick] = useState(0)
   const live = s.running && app.running && !!app.device
+  useActive('Curve Tracer', live)
   const [measured, setMeasured] = useState<Float64Array[] | null>(null)
   const [busy, setBusy] = useState(false)
   // Traces back to back while running, or once for Single (tick < 0); when tracing stops the generator returns to its settings.

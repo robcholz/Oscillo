@@ -23,6 +23,7 @@ import { useStore } from '../store'
 import { openTable, publish, saveImage, saveTable, type Table as DataTable } from '../files'
 import { toggleLoggingFor, useLoggingOf } from '../logging'
 import { useScope, type ChannelId } from './scope-store'
+import { useActive } from '../hwsync'
 
 /** Listen: loops the latest capture of one channel through the speakers, at its sample rate. */
 let audio: { ctx: AudioContext; gain: GainNode; src: AudioBufferSourceNode | null } | null = null
@@ -122,6 +123,7 @@ export function Scope() {
   const app = useStore()
   const cfg = s.cfg
   const live = s.running && app.running && !!app.device
+  useActive('Oscilloscope', live)
   const [tab, setTab] = useState<(typeof TABS)[number]>('Time')
   const [cap, setCap] = useState<Capture>(() => fromSamples(cfg, 1, null, null))
   const [history, setHistory] = useState<Capture[]>([])

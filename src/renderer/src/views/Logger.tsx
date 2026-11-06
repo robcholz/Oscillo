@@ -12,7 +12,7 @@ import { UnitInput } from '../components/UnitInput'
 import { useInterval } from '../components/useInterval'
 import { publish, saveTable, type Table as DataTable } from '../files'
 import { useStore } from '../store'
-import { wantMeters } from '../hwsync'
+import { wantMeters, useActive } from '../hwsync'
 import { readChannel } from './meters'
 
 const HISTORY = ['1 Minute', '10 Minutes', '1 Hour', 'Unlimited'] as const
@@ -86,6 +86,7 @@ export function Logger() {
   const [pts, setPts] = useState<Point[]>(() => (memory ??= []))
   const [dialog, setDialog] = useState<null | { title: string; fields: FormField[]; submitLabel: string; onSubmit: (v: Record<string, string>) => void }>(null)
   const live = s.running && app.running && !!app.device
+  useActive('Data Logger', live)
   const logTable = (): DataTable => {
     const t0 = pts[0]?.t ?? Date.now()
     return { columns: ['Time (s)', ...s.channels.map((c) => c.name)], data: [pts.map((p) => (p.t - t0) / 1000), ...s.channels.map((c) => pts.map((p) => p.v[c.id] ?? NaN))], at: t0 }

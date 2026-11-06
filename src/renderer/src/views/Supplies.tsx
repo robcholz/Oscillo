@@ -39,7 +39,10 @@ const USB_LIMIT = 2.5
 const IDLE_W = 0.62
 
 // The device follows the switches and setpoints.
-follow([useSupplies], () => { const { master, pos, neg } = useSupplies.getState(); return { master, pos, neg } }, pushSupplies, 'the supplies')
+follow([useSupplies], () => { const { master, pos, neg } = useSupplies.getState(); return { master, pos, neg } }, pushSupplies, 'the supplies', {
+  name: 'Supplies',
+  on: ({ master, pos, neg }) => master && (pos.on || neg.on)
+})
 
 /** What a rail measures, from the device's monitor. */
 function reading(r: Rail, live: boolean, side: 'pos' | 'neg') {

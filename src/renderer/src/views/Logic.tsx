@@ -20,6 +20,7 @@ import { hw } from '../devices'
 import { publish, saveImage, saveTable, saveText, type Table as DataTable } from '../files'
 import { toggleLoggingFor, useLoggingOf } from '../logging'
 import { useStore } from '../store'
+import { useActive } from '../hwsync'
 
 const TRIGGERS = ['Ignore', 'Low', 'High', 'Rising', 'Falling', 'Either Edge']
 const ROWS = { 'Compact Rows': 24, 'Default Rows': 32, 'Tall Rows': 44 } as const
@@ -132,6 +133,7 @@ export function Logic() {
   const [more, setMore] = useState(false)
   const [dialog, setDialog] = useState<null | { title: string; fields: FormField[]; submitLabel: string; onSubmit: (v: Record<string, string>) => void }>(null)
   const live = s.running && app.running && !!app.device
+  useActive('Logic Analyzer', live)
   const toast = app.toast
 
   // Captures back to back at 100 MS/s, triggered by the signals' trigger settings.

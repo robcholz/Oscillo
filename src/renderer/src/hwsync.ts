@@ -19,6 +19,22 @@ interface HwLive {
 }
 export const useHwLive = create<HwLive>()(() => ({ meters: null, monitor: null, dio: null }))
 
+/** Instruments working on the device right now (capturing, sweeping or driving outputs), for the status bar. */
+export const useActivity = create<{ on: Record<string, boolean> }>()(() => ({ on: {} }))
+export function setActive(name: string, on: boolean): void {
+  if (!!useActivity.getState().on[name] === on) return
+  useActivity.setState((s) => ({ on: { ...s.on, [name]: on } }))
+}
+/** Counts a page's instrument as active while `on` and the page is open. */
+export function useActive(name: string, on: boolean): void {
+  useEffect(() => {
+    setActive(name, on)
+    return () => setActive(name, false)
+  }, [name, on])
+}
+/** How many instruments are active. */
+export const useActiveCount = (): number => useActivity((s) => Object.values(s.on).filter(Boolean).length)
+
 /** True when a device is connected. */
 export const connected = (): boolean => !!hw && !!deviceById(useStore.getState().device)
 
@@ -156,9 +172,10 @@ export const resync = (): void => resyncs.forEach((f) => f())
 type Sub = { subscribe: (fn: () => void) => () => void }
 /**
  * Pushes `read()` to the device with `push` whenever it changes, and again after connecting, while
- * a device is connected. Failures show as a toast.
+ * a device is connected. Failures show as a toast. With `activity`, the instrument counts as active
+ * (see useActivity) while `activity.on` holds for what was pushed.
  */
-export function follow<T>(stores: Sub[], read: () => T, push: (v: T) => Promise<void>, what: string): void {
+export function follow<T>(stores: Sub[], read: () => T, push: (v: T) => Promise<void>, what: string, activity?: { name: string; on: (v: T) => boolean }): void {
   if (!hw) return
   let last = ''
   let dev: string | null = null
@@ -168,12 +185,20 @@ export function follow<T>(stores: Sub[], read: () => T, push: (v: T) => Promise<
       dev = app.device
       last = ''
     }
-    if (!connected()) return
+    if (!connected()) {
+      if (activity) setActive(activity.name, false)
+      return
+    }
     const v = read()
     const key = JSON.stringify(v)
     if (key === last) return
     last = key
-    push(v).catch((e: Error) => app.toast(`Could not update ${what}`, { detail: e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') }))
+    push(v)
+      .then(() => activity && setActive(activity.name, activity.on(v)))
+      .catch((e: Error) => {
+        if (activity) setActive(activity.name, false)
+        app.toast(`Could not update ${what}`, { detail: e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') })
+      })
   }
   for (const s of [useStore, ...stores]) s.subscribe(run)
   resyncs.push(() => {

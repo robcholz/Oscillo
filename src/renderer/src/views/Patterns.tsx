@@ -119,7 +119,7 @@ export function toPatterns(rows: Row[], bits: number[], rate: number): PatternRe
   return out.filter((p) => p.pin >= 0 && p.pin < 32)
 }
 
-// Real hardware plays the rows while the generator runs.
+// The device plays the rows while the generator runs.
 follow(
   [usePatterns],
   () => {
@@ -130,7 +130,8 @@ follow(
     if (list) await hw!.patterns(list)
     else await hw!.patternsStop()
   },
-  'the patterns'
+  'the patterns',
+  { name: 'Patterns', on: ({ list }) => !!list }
 )
 
 const pinLabel = (r: Row) => (r.width > 1 ? `DIO ${r.pin}–${r.pin + r.width - 1}` : `DIO ${r.pin}`)

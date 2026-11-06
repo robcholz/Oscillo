@@ -12,7 +12,7 @@ import { Plot, type Series } from '../components/Plot'
 import { UnitInput } from '../components/UnitInput'
 import { analyze, metrics, toDbv, WINDOWS, type WindowName } from '../../../shared/dsp/spectrum'
 import { hw } from '../devices'
-import { useCapture } from '../hwsync'
+import { useCapture, useActive } from '../hwsync'
 import { publish, saveImage, saveTable, type Table as DataTable } from '../files'
 import { toggleLoggingFor, useLoggingOf } from '../logging'
 import { useStore } from '../store'
@@ -108,6 +108,7 @@ export function Spectrum() {
   const [dialog, setDialog] = useState<null | { title: string; fields: FormField[]; submitLabel: string; onSubmit: (v: Record<string, string>) => void }>(null)
   const hold = useRef<{ max?: Float64Array; min?: Float64Array; avg?: Float64Array; n: number; ref?: Float64Array }>({ n: 0 })
   const live = s.running && app.running && !!app.device
+  useActive('Spectrum Analyzer', live)
 
   // Channel 1 captured at FS, back to back while running; Single keeps one capture.
   const req = { channels: [0], rate: FS, samples: N, range: { 0: s.c1Range } }
