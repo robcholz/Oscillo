@@ -231,6 +231,18 @@ export class Protocols {
     return [...r.subarray(0, tx.length)]
   }
 
+  /** Writes bytes without reading, keeping the select asserted (for long streams in chunks). */
+  spiWrite(tx: Uint8Array): void {
+    const { raw, h } = this
+    call(raw, 'FDwfDigitalSpiSelect', h, this.cs, 0)
+    if (tx.length) call(raw, 'FDwfDigitalSpiWrite', h, 1, 8, tx, tx.length)
+  }
+
+  /** Stops the SPI engine so its pins go back to static I/O. */
+  spiReset(): void {
+    call(this.raw, 'FDwfDigitalSpiReset', this.h)
+  }
+
   spiRelease(): void {
     call(this.raw, 'FDwfDigitalSpiSelect', this.h, this.cs, 1)
   }
@@ -357,6 +369,46 @@ export class BitBang {
     this.tick(0)
     return out
   }
+  /** `n` TCK cycles in Run-Test/Idle. */
+  jtagIdle(n: number): void {
+    for (let i = 0; i < n; i++) this.tick(0)
+  }
+  /** Run-Test/Idle → Shift-DR. */
+  jtagEnterShiftDR(): void {
+    for (const t of [1, 0, 0]) this.tick(t)
+  }
+  /**
+   * Clocks bytes into TDI with TMS low (MSB of each byte first) through the SPI engine, which is
+   * far faster than bit-banging: TCK is SCK, TDI is MOSI, TDO is MISO and TMS is the select line,
+   * held low for the whole stream. The TAP stays in its current state (Shift-DR or Idle).
+   */
+  async jtagStream(spi: { spiSetup: (s: SpiSetup) => void; spiWrite: (b: Uint8Array) => void; spiReset: () => void }, data: Uint8Array, hz: number, progress?: (done: number) => void): Promise<void> {
+    const { tck, tms, tdi, tdo } = this.j
+    spi.spiSetup({ frequency: hz, sck: tck, mosi: tdi, miso: tdo, cs: tms, mode: 0, msbFirst: true })
+    // Assert the select (TMS low) before static I/O lets go of the pins, so TCK never floats high.
+    spi.spiWrite(new Uint8Array(0))
+    this.oe = 0
+    this.apply()
+    const CHUNK = 16384
+    for (let i = 0; i < data.length; i += CHUNK) {
+      spi.spiWrite(data.subarray(i, i + CHUNK))
+      progress?.(Math.min(data.length, i + CHUNK))
+      // Let IPC and progress events through between chunks.
+      await new Promise((r) => setImmediate(r))
+    }
+    // Static I/O takes the pins back at the same levels (TCK low, TMS low) before SPI stops.
+    this.out = 0
+    this.oe = (1 << tck) | (1 << tms) | (1 << tdi)
+    this.apply()
+    spi.spiReset()
+  }
+  /** Shifts the last byte (MSB first) with TMS high on its last bit, then Update-DR → Idle. */
+  jtagShiftLastByte(b: number): void {
+    for (let k = 7; k >= 0; k--) this.tick(k === 0 ? 1 : 0, (b >> k) & 1)
+    this.tick(1)
+    this.tick(0)
+  }
+
   /** IDCODEs of the chain after reset, nearest TDO first (BYPASS devices read as 0). */
   jtagScan(max = 8): number[] {
     this.jtagReset()

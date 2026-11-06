@@ -1,8 +1,10 @@
 // An in-memory Analog Discovery 3 behind the same DwfRaw interface as the real library, so the app
 // runs without hardware and tests exercise the real wrapper. Wavegen 1 and 2 loop back into scope
 // channels 1 and 2; DIO pins read back what they drive, and undriven pins read a slow counter.
+// A simulated XC7A35T sits on DIO 0–3 as JTAG (TCK, TMS, TDI, TDO), reachable by bit-banging or SPI.
 import * as C from './generated'
 import type { DwfRaw } from './generated'
+import { SimTap } from './jtag-sim'
 
 interface Wave {
   enabled: boolean
@@ -51,6 +53,8 @@ export interface SimOptions {
   noise?: number
   /** Milliseconds since start; injected so tests control time. */
   now?: () => number
+  /** The FPGA on DIO 0-3 (TCK, TMS, TDI, TDO); injected so tests can inspect it. */
+  tap?: SimTap
 }
 
 const write = (buf: Buffer, s: string): void => {
@@ -181,6 +185,12 @@ export function createSimDwf(opts: SimOptions = {}): DwfRaw {
       return d
     })
   }
+
+  // JTAG target pins and the SPI engine's wiring.
+  const J = { tck: 0, tms: 1, tdi: 2, tdo: 3 }
+  const tap = opts.tap ?? new SimTap()
+  let lastTck = 0
+  const spi = { clk: 0, mosi: 1, miso: 2, cs: 3, msb: true, selected: false }
 
   const impl: Partial<Record<keyof DwfRaw, (...args: never[]) => number>> = {
     FDwfGetLastError: (p: Int32Array) => ((p[0] = lastError), 1),
@@ -359,14 +369,58 @@ export function createSimDwf(opts: SimOptions = {}): DwfRaw {
     FDwfDigitalIOOutputEnableInfo: (h: number, p: Uint32Array) => (need(h) ? ((p[0] = 0xffff), ok()) : badHandle()),
     FDwfDigitalIOOutputEnableSet: (h: number, v: number) => (need(h) ? ((s.dio.enable = v & 0xffff), ok()) : badHandle()),
     FDwfDigitalIOOutputSet: (h: number, v: number) => (need(h) ? ((s.dio.output = v & 0xffff), ok()) : badHandle()),
-    FDwfDigitalIOConfigure: (h: number) => (need(h) ? ok() : badHandle()),
+    FDwfDigitalIOConfigure: (h: number) => {
+      if (!need(h)) return badHandle()
+      const lv = (p: number) => (s.dio.output & s.dio.enable) >> p & 1
+      const tck = lv(J.tck)
+      if (tck && !lastTck && !spi.selected) tap.clock(lv(J.tms), lv(J.tdi))
+      lastTck = tck
+      return ok()
+    },
     FDwfDigitalIOStatus: (h: number) => (need(h) ? ok() : badHandle()),
     FDwfDigitalIOInputStatus: (h: number, p: Uint32Array) => {
       if (!need(h)) return badHandle()
       const counter = Math.floor(now() / 1000) & 0xffff
-      p[0] = ((s.dio.output & s.dio.enable) | (counter & ~s.dio.enable)) & 0xffff
+      const tdo = s.dio.enable & (1 << J.tdo) ? 0 : tap.tdo << J.tdo
+      p[0] = (((s.dio.output & s.dio.enable) | (counter & ~s.dio.enable & ~(1 << J.tdo)) | tdo) & 0xffff) >>> 0
+      return ok()
+    },
+
+    // SPI master: clocks the simulated JTAG target when its pins are TCK, TDI, TDO and TMS (select).
+    FDwfDigitalSpiReset: (h: number) => (need(h) ? ((spi.selected = false), ok()) : badHandle()),
+    FDwfDigitalSpiFrequencySet: (h: number) => (need(h) ? ok() : badHandle()),
+    FDwfDigitalSpiClockSet: (h: number, c: number) => (need(h) ? ((spi.clk = c), ok()) : badHandle()),
+    FDwfDigitalSpiDataSet: (h: number, dq: number, c: number) => (need(h) ? (dq === 0 ? (spi.mosi = c) : (spi.miso = c), ok()) : badHandle()),
+    FDwfDigitalSpiModeSet: (h: number) => (need(h) ? ok() : badHandle()),
+    FDwfDigitalSpiOrderSet: (h: number, msb: number) => (need(h) ? ((spi.msb = !!msb), ok()) : badHandle()),
+    FDwfDigitalSpiSelectSet: (h: number, c: number) => (need(h) ? ((spi.cs = c), ok()) : badHandle()),
+    FDwfDigitalSpiSelect: (h: number, c: number, level: number) => (need(h) ? (c === spi.cs && (spi.selected = level === 0), ok()) : badHandle()),
+    FDwfDigitalSpiWrite: (h: number, _dq: number, bits: number, tx: Uint8Array, n: number) => (need(h) ? (spiShift(bits, tx, n), ok()) : badHandle()),
+    FDwfDigitalSpiWriteRead: (h: number, _dq: number, bits: number, tx: Uint8Array, n: number, rx: Uint8Array, nr: number) => {
+      if (!need(h)) return badHandle()
+      const r = spiShift(bits, tx, n)
+      for (let i = 0; i < nr; i++) rx[i] = r[i] ?? 0
       return ok()
     }
+  }
+
+  /** Shifts words out of MOSI; returns what MISO read. */
+  function spiShift(bits: number, tx: Uint8Array, n: number): number[] {
+    const wired = spi.clk === J.tck && spi.mosi === J.tdi
+    const tms = spi.cs === J.tms ? (spi.selected ? 0 : 1) : (s.dio.output & s.dio.enable) >> J.tms & 1
+    const out: number[] = []
+    for (let i = 0; i < n; i++) {
+      let r = 0
+      for (let k = 0; k < bits; k++) {
+        const b = spi.msb ? bits - 1 - k : k
+        const tdi = (tx[i] >> b) & 1
+        const tdo = spi.miso === J.tdo ? tap.tdo : 0
+        if (wired) tap.clock(tms, tdi)
+        r |= tdo << b
+      }
+      out.push(r)
+    }
+    return out
   }
 
   function nodeSet(h: number, c: number, node: number, f: (w: Wave) => void): number {

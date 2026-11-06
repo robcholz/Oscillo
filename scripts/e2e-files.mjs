@@ -76,5 +76,40 @@ await win.waitForTimeout(1500)
 await win.getByRole('button', { name: 'Export and Logging' }).first().click().catch(() => {})
 await win.waitForTimeout(500)
 await shot('export-live')
+// FPGA Utility: scan and program the Demo Device's simulated XC7A35T with a full-size bitstream.
+{
+  const { writeFileSync } = await import('node:fs')
+  const data = [...new Array(16).fill(0xff), 0, 0, 0, 0xbb, 0x11, 0x22, 0, 0x44, 0xff, 0xff, 0xff, 0xff, 0xaa, 0x99, 0x55, 0x66]
+  const body = new Uint8Array(2192012)
+  body.set(data)
+  for (let i = data.length; i < body.length; i++) body[i] = (i * 37) & 0xff
+  const out = [0x00, 0x09, 0x0f, 0xf0, 0x0f, 0xf0, 0x0f, 0xf0, 0x0f, 0xf0, 0x00, 0x00, 0x01]
+  for (const [k, v] of [['a', 'blinky;UserID=0XFFFFFFFF'], ['b', '7a35tcpg236'], ['c', '2026/11/06'], ['d', '12:00:00']]) {
+    const b = [...Buffer.from(v), 0]
+    out.push(k.charCodeAt(0), b.length >> 8, b.length & 0xff, ...b)
+  }
+  const n = body.length
+  out.push(0x65, (n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff)
+  const file = join(profile, 'blinky.bit')
+  writeFileSync(file, Buffer.concat([Buffer.from(out), Buffer.from(body)]))
+  await win.evaluate((f) => {
+    const raw = JSON.parse(localStorage.getItem('oscillo'))
+    raw.state.page = 'fpga'
+    localStorage.setItem('oscillo', JSON.stringify(raw))
+    localStorage.setItem('oscillo.fpga', JSON.stringify({ state: { path: f }, version: 1 }))
+  }, file)
+  await win.reload()
+  await win.waitForTimeout(1500)
+  await win.getByRole('button', { name: 'Scan Chain' }).click()
+  await win.waitForTimeout(1500)
+  const chain = await win.locator('table').first().innerText()
+  const t0 = Date.now()
+  await win.getByRole('button', { name: 'Program FPGA' }).click()
+  await win.waitForTimeout(400)
+  await shot('fpga-busy')
+  await win.getByText('Programmed blinky.bit').first().waitFor({ timeout: 60000 })
+  console.log('fpga', JSON.stringify({ chain, seconds: (Date.now() - t0) / 1000 }))
+  await shot('fpga')
+}
 console.log('errors', errors)
 await app.close()

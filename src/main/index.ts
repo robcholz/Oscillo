@@ -4,6 +4,7 @@ import { FILES } from '../shared/files'
 import { IPC } from '../shared/ipc'
 import { registerCalibration } from './calibration'
 import { registerFiles } from './files'
+import { registerFpga } from './fpga'
 import { registerHardware } from './hardware'
 import { registerMcp, stdioBridge } from './mcp'
 import { registerScript, runCli } from './script'
@@ -102,6 +103,7 @@ if (stdio) {
     const hw = registerHardware()
     registerFiles()
     registerCalibration(hw)
+    registerFpga(hw)
     registerMcp(hw, registerScript(hw))
     createWindow()
     app.on('activate', () => {

@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { CAL, type CalApi } from '../shared/calibration'
 import { FILES, type FilesApi } from '../shared/files'
+import { FPGA, type FpgaApi, type FpgaProgress } from '../shared/fpga'
 import { HW, type HwApi } from '../shared/hw'
 import { IPC, type ThemePref } from '../shared/ipc'
 import { MCP, type McpApi, type McpEvent } from '../shared/mcp'
@@ -56,6 +57,19 @@ const files = {
 /** Calibration (src/main/calibration.ts). */
 const calibration = Object.fromEntries(Object.entries(CAL).map(([k, ch]) => [k, invoke(ch)])) as unknown as CalApi
 
+/** FPGA programming over DIO JTAG (src/main/fpga.ts). */
+const fpga: FpgaApi = {
+  browse: () => ipcRenderer.invoke(FPGA.browse),
+  inspect: (path) => ipcRenderer.invoke(FPGA.inspect, path),
+  scan: (pins) => ipcRenderer.invoke(FPGA.scan, pins),
+  program: (pins, path, hz) => ipcRenderer.invoke(FPGA.program, pins, path, hz),
+  onProgress: (fn) => {
+    const h = (_e: unknown, p: FpgaProgress) => fn(p)
+    ipcRenderer.on(FPGA.progress, h)
+    return () => void ipcRenderer.removeListener(FPGA.progress, h)
+  }
+}
+
 const api = {
   platform: process.platform,
   setTheme: (theme: ThemePref): void => ipcRenderer.send(IPC.setTheme, theme),
@@ -63,7 +77,8 @@ const api = {
   script,
   mcp,
   files,
-  calibration
+  calibration,
+  fpga
 }
 
 contextBridge.exposeInMainWorld('oscillo', api)

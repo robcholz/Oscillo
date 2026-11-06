@@ -108,7 +108,7 @@ describe('simulated Analog Discovery 3', () => {
 
   it('fails unmodelled functions as not supported', () => {
     const raw = createSimDwf()
-    expect(raw.FDwfDigitalSpiReset(1)).toBe(0)
+    expect(raw.FDwfDigitalCanReset(1)).toBe(0)
     const code = new Int32Array(1)
     raw.FDwfGetLastError(code)
     expect(code[0]).toBe(dwf.dwfercNotSupported)

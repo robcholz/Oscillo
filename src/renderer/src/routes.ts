@@ -52,7 +52,7 @@ const all: PageInfo[] = [
 ]
 
 /** Pages that are not real yet stay out of the sidebar, search and shortcuts. */
-const HIDDEN: PageId[] = ['fpga']
+const HIDDEN: PageId[] = []
 export const pages: PageInfo[] = all.filter((p) => !HIDDEN.includes(p.id))
 
 export const pageById = Object.fromEntries(all.map((p) => [p.id, p])) as Record<PageId, PageInfo>
