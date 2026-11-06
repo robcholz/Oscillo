@@ -85,8 +85,67 @@ export const HW = {
   supplies: 'hw:supplies',
   monitor: 'hw:monitor',
   dioWrite: 'hw:dio-write',
-  dioRead: 'hw:dio-read'
+  dioRead: 'hw:dio-read',
+  logic: 'hw:logic',
+  patterns: 'hw:patterns',
+  patternsStop: 'hw:patterns-stop',
+  protocol: 'hw:protocol'
 } as const
+
+export interface LogicRequest {
+  rate: number
+  samples: number
+  /** DIO pins whose rising or falling edge triggers; none = capture at once. */
+  trigger?: { rise: number[]; fall: number[]; position: number; autoTimeout: number }
+}
+export interface LogicReply {
+  rate: number
+  /** Bit n of each word is DIO n. */
+  data: Uint16Array
+}
+export interface PatternRequest {
+  pin: number
+  kind: 'Clock' | 'Pulse' | 'Random' | 'Custom' | 'Constant'
+  frequency: number
+  duty?: number
+  data?: number[]
+  initHigh?: boolean
+  idle?: 'Init' | 'Low' | 'High' | 'Z'
+}
+
+type Spi = { sck: number; mosi: number; miso: number; cs: number; frequency: number; mode?: number; msbFirst?: boolean }
+/** Protocol master calls (UART, SPI, I²C, CAN from the SDK; JTAG, SWD and AVR built on top). */
+export interface ProtocolCalls {
+  uartSetup(u: { tx: number; rx: number; baud: number; bits?: number; parity?: number; stop?: number }): void
+  uartSend(data: number[]): void
+  uartReceive(max?: number): { data: number[]; parityError: boolean }
+  spiSetup(s: Spi): void
+  spiTransfer(tx: number[]): number[]
+  i2cSetup(s: { scl: number; sda: number; rate: number }): void
+  i2cTransfer(address: number, tx: number[], rxLength: number): { data: number[]; nak: number }
+  canSetup(s: { tx: number; rx: number; rate: number }): void
+  canSend(f: { id: number; extended: boolean; remote: boolean; data: number[] }): void
+  canReceive(): { id: number; extended: boolean; remote: boolean; data: number[] } | null
+  jtagSetup(p: { tck: number; tms: number; tdi: number; tdo: number }): void
+  jtagReset(): void
+  /** Value and result as hex strings. */
+  jtagShift(reg: 'IR' | 'DR', len: number, hex: string): string
+  jtagScan(): number[]
+  swdSetup(p: { clk: number; io: number }): void
+  swdConnect(): number
+  swdTransfer(ap: boolean, read: boolean, addr: number, value?: number): number
+  avrEnter(spi: Spi): number[]
+  avrLeave(): void
+  avrFuses(): { low: number; high: number; ext: number; lock: number }
+  avrWriteFuses(f: { low: number; high: number; ext: number; lock: number }): void
+  avrReadFlashWord(word: number): [number, number]
+  avrReadEeprom(addr: number): number
+  avrErase(): void
+  /** Programs (or verifies) an Intel HEX file; returns the bytes written or checked. */
+  avrProgram(path: string, chip: string): number
+  avrVerify(path: string, chip: string): number
+}
+export const PROTOCOL_CALLS: (keyof ProtocolCalls)[] = ['uartSetup', 'uartSend', 'uartReceive', 'spiSetup', 'spiTransfer', 'i2cSetup', 'i2cTransfer', 'canSetup', 'canSend', 'canReceive', 'jtagSetup', 'jtagReset', 'jtagShift', 'jtagScan', 'swdSetup', 'swdConnect', 'swdTransfer', 'avrEnter', 'avrLeave', 'avrFuses', 'avrWriteFuses', 'avrReadFlashWord', 'avrReadEeprom', 'avrErase', 'avrProgram', 'avrVerify']
 
 export interface HwApi {
   status(): Promise<HwStatus>
@@ -100,4 +159,8 @@ export interface HwApi {
   monitor(): Promise<Monitor>
   dioWrite(mask: number, value: number): Promise<void>
   dioRead(): Promise<number>
+  logic(r: LogicRequest): Promise<LogicReply>
+  patterns(p: PatternRequest[]): Promise<void>
+  patternsStop(): Promise<void>
+  protocol<K extends keyof ProtocolCalls>(call: K, ...args: Parameters<ProtocolCalls[K]>): Promise<ReturnType<ProtocolCalls[K]>>
 }

@@ -2,6 +2,7 @@
 // static I/O. Every SDK call is checked; a failure throws DwfError with the SDK's own message.
 import * as C from './generated'
 import type { DwfRaw } from './generated'
+import { BitBang, LogicIn, PatternOut, Protocols } from './digital'
 
 export class DwfError extends Error {
   constructor(
@@ -17,7 +18,7 @@ export class DwfError extends Error {
 const str = (b: Buffer): string => b.toString('utf8', 0, Math.max(0, b.indexOf(0) < 0 ? b.length : b.indexOf(0)))
 
 /** Calls one SDK function and throws if it returns 0. */
-function call<K extends keyof DwfRaw>(raw: DwfRaw, fn: K, ...args: Parameters<DwfRaw[K]>): void {
+export function call<K extends keyof DwfRaw>(raw: DwfRaw, fn: K, ...args: Parameters<DwfRaw[K]>): void {
   const ok = (raw[fn] as (...a: unknown[]) => number)(...args)
   if (ok) return
   const code = new Int32Array(1)
@@ -32,7 +33,7 @@ const int = (raw: DwfRaw, fn: keyof DwfRaw, ...args: unknown[]): number => {
   ;(call as (...a: unknown[]) => void)(raw, fn, ...args, out)
   return out[0]
 }
-const dbl = (raw: DwfRaw, fn: keyof DwfRaw, ...args: unknown[]): number => {
+export const dbl = (raw: DwfRaw, fn: keyof DwfRaw, ...args: unknown[]): number => {
   const out = new Float64Array(1)
   ;(call as (...a: unknown[]) => void)(raw, fn, ...args, out)
   return out[0]
@@ -412,6 +413,10 @@ export class Device {
   readonly wavegen: Wavegen
   readonly io: AnalogIO
   readonly dio: DigitalIO
+  readonly logic: LogicIn
+  readonly patterns: PatternOut
+  readonly protocols: Protocols
+  readonly bitbang: BitBang
   private closed = false
 
   constructor(
@@ -422,6 +427,10 @@ export class Device {
     this.wavegen = new Wavegen(raw, handle)
     this.io = new AnalogIO(raw, handle)
     this.dio = new DigitalIO(raw, handle)
+    this.logic = new LogicIn(raw, handle)
+    this.patterns = new PatternOut(raw, handle)
+    this.protocols = new Protocols(raw, handle)
+    this.bitbang = new BitBang(raw, handle)
   }
 
   /** Applies settings as they are set (on by default), instead of at Configure. */

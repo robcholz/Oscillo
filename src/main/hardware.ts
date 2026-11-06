@@ -1,9 +1,11 @@
 // Owns the device. Loads the WaveForms SDK (the copy bundled in the app first, then a system install),
 // lists real devices plus the simulated Demo Device, and serves the renderer's instrument calls.
-import { Dwf, DwfError, createSimDwf, findLibrary, loadDwf, type Device } from '@oscillo/dwf'
+import { AVR_CHIPS, Avr, Dwf, DwfError, createSimDwf, findLibrary, loadDwf, parseIntelHex, type Device } from '@oscillo/dwf'
+import { readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { app, ipcMain } from 'electron'
 import { join } from 'node:path'
-import { HW, type HwDevice, type HwStatus, type Monitor, type ScopeReply, type ScopeRequest, type SupplyRequest, type WaveRequest } from '../shared/hw'
+import { HW, PROTOCOL_CALLS, type HwDevice, type LogicReply, type LogicRequest, type PatternRequest, type ProtocolCalls, type HwStatus, type Monitor, type ScopeReply, type ScopeRequest, type SupplyRequest, type WaveRequest } from '../shared/hw'
 
 const DEMO = 'DEMO'
 
@@ -127,6 +129,66 @@ export class Hardware {
   dioRead(): number {
     return this.need().dio.read()
   }
+
+  logic(r: LogicRequest): Promise<LogicReply> {
+    return this.need().logic.single({ ...r, timeout: 5000 })
+  }
+
+  patterns(p: PatternRequest[]): void {
+    this.need().patterns.start(p)
+  }
+
+  patternsStop(): void {
+    this.need().patterns.stop()
+  }
+
+  protocol(name: keyof ProtocolCalls, args: unknown[]): unknown {
+    if (!PROTOCOL_CALLS.includes(name)) throw new Error(`Unknown protocol call ${name}`)
+    const d = this.need()
+    const p = d.protocols
+    const b = d.bitbang
+    const avr = new Avr(p)
+    const image = (path: string, chip: string) => {
+      const c = AVR_CHIPS[chip]
+      if (!c) throw new Error(`Unknown chip ${chip}`)
+      return { img: parseIntelHex(readFileSync(path.replace(/^~(?=\/|$)/, homedir()), 'utf8'), c.flashBytes), c }
+    }
+    const calls: { [K in keyof ProtocolCalls]: (...a: Parameters<ProtocolCalls[K]>) => ReturnType<ProtocolCalls[K]> } = {
+      uartSetup: (u) => p.uartSetup(u),
+      uartSend: (data) => p.uartSend(data),
+      uartReceive: (max) => p.uartReceive(max),
+      spiSetup: (s) => p.spiSetup(s),
+      spiTransfer: (tx) => p.spiTransfer(tx),
+      i2cSetup: (s) => p.i2cSetup(s),
+      i2cTransfer: (a, tx, n) => p.i2cTransfer(a, tx, n),
+      canSetup: (s) => p.canSetup(s),
+      canSend: (f) => p.canSend(f),
+      canReceive: () => p.canReceive(),
+      jtagSetup: (pins) => b.jtagSetup(pins),
+      jtagReset: () => b.jtagReset(),
+      jtagShift: (reg, len, hex) => b.jtagShift(reg, len, BigInt('0x' + (hex || '0'))).toString(16).toUpperCase(),
+      jtagScan: () => b.jtagScan(),
+      swdSetup: (pins) => b.swdSetup(pins),
+      swdConnect: () => b.swdConnect(),
+      swdTransfer: (ap, read, addr, value) => b.swdTransfer(ap, read, addr, value),
+      avrEnter: (s) => {
+        p.spiSetup(s)
+        return avr.enter()
+      },
+      avrLeave: () => avr.leave(),
+      avrFuses: () => avr.fuses(),
+      avrWriteFuses: (f) => avr.writeFuses(f),
+      avrReadFlashWord: (w) => avr.readFlashWord(w),
+      avrReadEeprom: (a) => avr.readEeprom(a),
+      avrErase: () => avr.erase(),
+      avrProgram: (path, chip) => {
+        const { img, c } = image(path, chip)
+        return avr.program(img, c)
+      },
+      avrVerify: (path, chip) => avr.verify(image(path, chip).img)
+    }
+    return (calls[name] as (...a: unknown[]) => unknown)(...args)
+  }
 }
 
 /** Registers the IPC handlers. Errors reach the renderer with the SDK's message. */
@@ -152,6 +214,10 @@ export function registerHardware(): Hardware {
   handle(HW.monitor, () => hw.monitor())
   handle(HW.dioWrite, (m: number, v: number) => hw.dioWrite(m, v))
   handle(HW.dioRead, () => hw.dioRead())
+  handle(HW.logic, (r: LogicRequest) => hw.logic(r))
+  handle(HW.patterns, (p: PatternRequest[]) => hw.patterns(p))
+  handle(HW.patternsStop, () => hw.patternsStop())
+  handle(HW.protocol, (name: keyof ProtocolCalls, ...args: unknown[]) => hw.protocol(name, args))
   app.on('before-quit', () => hw.close())
   return hw
 }
