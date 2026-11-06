@@ -2,7 +2,8 @@
 
 Oscillo's backend for Digilent devices. It wraps the WaveForms SDK (`libdwf`), which ships with WaveForms.
 
-- `include/dwf.h` is the SDK header, vendored as is. `npm run gen` turns it into `src/generated.ts`, which holds every constant, the C prototypes and a typed `DwfRaw` interface for all ~500 functions.
+- `include/dwf.h` is the SDK header, copied from `macos/dwf.framework`. `npm run gen` turns it into `src/generated.ts`, which holds every constant, the C prototypes and a typed `DwfRaw` interface for all ~520 functions.
+- `macos/dwf.framework` is the macOS SDK (universal: arm64 and x86_64), bundled into Oscillo.app.
 - `loadDwf()` binds the installed library with [koffi](https://koffi.dev). It looks in the standard install locations:
   - macOS: `/Library/Frameworks/dwf.framework/dwf`
   - Linux: `libdwf.so`

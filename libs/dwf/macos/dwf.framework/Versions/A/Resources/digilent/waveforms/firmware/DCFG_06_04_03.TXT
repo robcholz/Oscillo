@@ -1,0 +1,12 @@
+osc: 4 ram: 60000000 awg: 2 ram: 65536 play: 0 pwg: 0 ram: 0 pwr: 1 log: 16 ram: 1000000 num: 16 ram: 32768 sio: 16 for_Standard2
+Oscilloscope with 4/2 channels:
+   240M 16bit sample buffer
+
+Arbitrary Waveform Generator x 2:
+   64Ki 14bit carrier, 16Ki 16bit AM and FM buffer
+
+Logic Analyzer
+   1M 16bit sample buffer
+
+Pattern Generator
+   32Ki 16bit custom buffer

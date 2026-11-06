@@ -93,6 +93,9 @@ export const devidDiscovery3: DEVID = 10
 export const devidADP5470: DEVID = 11
 export const devidADP5490: DEVID = 12
 export const devidADP2230: DEVID = 14
+export const devidADSMax: DEVID = 15
+export const devidADP2440: DEVID = 16
+export const devidADP2450: DEVID = 17
 export const devverEExplorerC: DEVVER = 2
 export const devverEExplorerE: DEVVER = 4
 export const devverEExplorerF: DEVVER = 5
@@ -117,6 +120,7 @@ export const trigsrcExternal4: TRIGSRC = 14
 export const trigsrcHigh: TRIGSRC = 15
 export const trigsrcLow: TRIGSRC = 16
 export const trigsrcClock: TRIGSRC = 17
+export const trigsrcDIO: TRIGSRC = 32
 export const DwfStateReady: DwfState = 0
 export const DwfStateConfig: DwfState = 4
 export const DwfStatePrefill: DwfState = 5
@@ -190,6 +194,8 @@ export const funcPulse: FUNC = 7
 export const funcTrapezium: FUNC = 8
 export const funcSinePower: FUNC = 9
 export const funcSineNA: FUNC = 10
+export const funcDualCustom: FUNC = 26
+export const funcDualPattern: FUNC = 27
 export const funcCustomPattern: FUNC = 28
 export const funcPlayPattern: FUNC = 29
 export const funcCustom: FUNC = 30
@@ -222,6 +228,8 @@ export const analogioTime: ANALOGIO = 9
 export const analogioFrequency: ANALOGIO = 10
 export const analogioResistance: ANALOGIO = 11
 export const analogioSlew: ANALOGIO = 12
+export const analogioRPM: ANALOGIO = 13
+export const analogioPercent: ANALOGIO = 14
 export const DwfDmmResistance: DwfDmm = 1
 export const DwfDmmContinuity: DwfDmm = 2
 export const DwfDmmDiode: DwfDmm = 3
@@ -261,21 +269,21 @@ export const DwfDigitalOutIdleInit: DwfDigitalOutIdle = 0
 export const DwfDigitalOutIdleLow: DwfDigitalOutIdle = 1
 export const DwfDigitalOutIdleHigh: DwfDigitalOutIdle = 2
 export const DwfDigitalOutIdleZet: DwfDigitalOutIdle = 3
-/** Ohms */
+/** Z Ohms */
 export const DwfAnalogImpedanceImpedance: DwfAnalogImpedance = 0
 /** Radians */
 export const DwfAnalogImpedanceImpedancePhase: DwfAnalogImpedance = 1
-/** Ohms */
+/** Rs Ohms */
 export const DwfAnalogImpedanceResistance: DwfAnalogImpedance = 2
-/** Ohms */
+/** Xs Ohms */
 export const DwfAnalogImpedanceReactance: DwfAnalogImpedance = 3
 /** Siemen */
 export const DwfAnalogImpedanceAdmittance: DwfAnalogImpedance = 4
 /** Radians */
 export const DwfAnalogImpedanceAdmittancePhase: DwfAnalogImpedance = 5
-/** Siemen */
+/** Gp Siemen */
 export const DwfAnalogImpedanceConductance: DwfAnalogImpedance = 6
-/** Siemen */
+/** Bp Siemen */
 export const DwfAnalogImpedanceSusceptance: DwfAnalogImpedance = 7
 /** Farad */
 export const DwfAnalogImpedanceSeriesCapacitance: DwfAnalogImpedance = 8
@@ -320,11 +328,34 @@ export const DwfParamExtFreq: DwfParam = 9
 /** 0 internal, 1 output, 2 input, 3 IO */
 export const DwfParamClockMode: DwfParam = 10
 export const DwfParamTempLimit: DwfParam = 11
+/** mDegree 0..360000 */
 export const DwfParamFreqPhase: DwfParam = 12
 /** mV */
 export const DwfParamDigitalVoltage: DwfParam = 13
 /** readonly */
 export const DwfParamFreqPhaseSteps: DwfParam = 14
+/** mV */
+export const DwfParamDigitalThreshold: DwfParam = 15
+/** *C temperature set */
+export const DwfParamFanTemp: DwfParam = 16
+/** RPM 0 default */
+export const DwfParamFanMin: DwfParam = 17
+/** RPM */
+export const DwfParamFanMax: DwfParam = 18
+/** Hz */
+export const DwfParamDigFrequency: DwfParam = 19
+/** m% */
+export const DwfParamFanDuty: DwfParam = 20
+/** Hz compensation output */
+export const DwfParamCompFreq: DwfParam = 21
+/** m% compensation output */
+export const DwfParamCompDuty: DwfParam = 22
+/** 0 default, 1 duty, 2,3,4,5 temperature sensors */
+export const DwfParamFanCtrl: DwfParam = 23
+/** seconds, idle time for device shutdown */
+export const DwfParamSleep: DwfParam = 24
+/** Hz */
+export const DwfParamDACFrequency: DwfParam = 25
 export const DwfWindowRectangular: DwfWindow = 0
 export const DwfWindowTriangular: DwfWindow = 1
 export const DwfWindowHamming: DwfWindow = 2
@@ -341,6 +372,7 @@ export const DwfFiirWindow: DwfFiirMode = 0
 export const DwfFiirFir: DwfFiirMode = 1
 export const DwfFiirIirButterworth: DwfFiirMode = 2
 export const DwfFiirIirChebyshev: DwfFiirMode = 3
+export const DwfFiirPole: DwfFiirMode = 4
 export const DwfFiirLowPass: DwfFiirType = 0
 export const DwfFiirHighPass: DwfFiirType = 1
 export const DwfFiirBandPass: DwfFiirType = 2
@@ -556,6 +588,9 @@ export const PROTOTYPES: string[] = [
   "int FDwfAnalogOutIdleInfo(HDWF hdwf, int idxChannel, int * pfsidle)",
   "int FDwfAnalogOutIdleSet(HDWF hdwf, int idxChannel, DwfAnalogOutIdle idle)",
   "int FDwfAnalogOutIdleGet(HDWF hdwf, int idxChannel, DwfAnalogOutIdle * pidle)",
+  "int FDwfAnalogOutSlewInfo(HDWF hdwf, int idxChannel, double * pMin, double * pMax)",
+  "int FDwfAnalogOutSlewSet(HDWF hdwf, int idxChannel, double vsSlew)",
+  "int FDwfAnalogOutSlewGet(HDWF hdwf, int idxChannel, double * pvsSlew)",
   "int FDwfAnalogOutNodeInfo(HDWF hdwf, int idxChannel, int * pfsnode)",
   "int FDwfAnalogOutNodeEnableSet(HDWF hdwf, int idxChannel, AnalogOutNode node, int fMode)",
   "int FDwfAnalogOutNodeEnableGet(HDWF hdwf, int idxChannel, AnalogOutNode node, int * pfMode)",
@@ -654,6 +689,8 @@ export const PROTOTYPES: string[] = [
   "int FDwfDigitalInClockSourceInfo(HDWF hdwf, int * pfsDwfDigitalInClockSource)",
   "int FDwfDigitalInClockSourceSet(HDWF hdwf, DwfDigitalInClockSource v)",
   "int FDwfDigitalInClockSourceGet(HDWF hdwf, DwfDigitalInClockSource * pv)",
+  "int FDwfDigitalInSamplingSet(HDWF hdwf, TRIGSRC trigsrc, DwfTriggerSlope slope, double sDelay)",
+  "int FDwfDigitalInSamplingGet(HDWF hdwf, TRIGSRC * trigsrc, DwfTriggerSlope * slope, double * sDelay)",
   "int FDwfDigitalInDividerInfo(HDWF hdwf, unsigned int * pdivMax)",
   "int FDwfDigitalInDividerSet(HDWF hdwf, unsigned int div)",
   "int FDwfDigitalInDividerGet(HDWF hdwf, unsigned int * pdiv)",
@@ -751,6 +788,8 @@ export const PROTOTYPES: string[] = [
   "int FDwfDigitalOutPlayDataSet(HDWF hdwf, unsigned char * rgBits, unsigned int bitPerSample, unsigned int countOfSamples)",
   "int FDwfDigitalOutPlayUpdateSet(HDWF hdwf, unsigned char * rgBits, unsigned int indexOfSample, unsigned int countOfSamples)",
   "int FDwfDigitalOutPlayRateSet(HDWF hdwf, double hzRate)",
+  "int FDwfDigitalOutPlayStatus(HDWF hdwf, int * cdDataFree, int * cdDataLost, int * cdDataCorrupted)",
+  "int FDwfDigitalOutSamplingSet(HDWF hdwf, TRIGSRC trigsrc, DwfTriggerSlope slope, double sDelay)",
   "int FDwfDigitalUartReset(HDWF hdwf)",
   "int FDwfDigitalUartRateSet(HDWF hdwf, double hz)",
   "int FDwfDigitalUartBitsSet(HDWF hdwf, int cBits)",
@@ -761,6 +800,8 @@ export const PROTOTYPES: string[] = [
   "int FDwfDigitalUartRxSet(HDWF hdwf, int idxChannel)",
   "int FDwfDigitalUartTx(HDWF hdwf, char * szTx, int cTx)",
   "int FDwfDigitalUartRx(HDWF hdwf, char * szRx, int cRx, int * pcRx, int * pParity)",
+  "int FDwfDigitalUartTx16(HDWF hdwf, unsigned short * szTx, int cTx)",
+  "int FDwfDigitalUartRx16(HDWF hdwf, unsigned short * szRx, int cRx, int * pcRx, int * pParity)",
   "int FDwfDigitalSpiReset(HDWF hdwf)",
   "int FDwfDigitalSpiFrequencySet(HDWF hdwf, double hz)",
   "int FDwfDigitalSpiClockSet(HDWF hdwf, int idxChannel)",
@@ -770,43 +811,53 @@ export const PROTOTYPES: string[] = [
   "int FDwfDigitalSpiOrderSet(HDWF hdwf, int fMSBFirst)",
   "int FDwfDigitalSpiDelaySet(HDWF hdwf, int cStart, int cCmd, int cWord, int cStop)",
   "int FDwfDigitalSpiSelectSet(HDWF hdwf, int idxSelect, int fIdle)",
+  "int FDwfDigitalSpiDutySet(HDWF hdwf, int prcDuty)",
   "int FDwfDigitalSpiSelect(HDWF hdwf, int idxChannel, int level)",
   "int FDwfDigitalSpiWriteRead(HDWF hdwf, int cDQ, int cBitPerWord, unsigned char * rgTX, int cTX, unsigned char * rgRX, int cRX)",
   "int FDwfDigitalSpiWriteRead16(HDWF hdwf, int cDQ, int cBitPerWord, unsigned short * rgTX, int cTX, unsigned short * rgRX, int cRX)",
   "int FDwfDigitalSpiWriteRead32(HDWF hdwf, int cDQ, int cBitPerWord, unsigned int * rgTX, int cTX, unsigned int * rgRX, int cRX)",
+  "int FDwfDigitalSpiWriteRead64(HDWF hdwf, int cDQ, int cBitPerWord, unsigned long long * rgTX, int cTX, unsigned long long * rgRX, int cRX)",
   "int FDwfDigitalSpiRead(HDWF hdwf, int cDQ, int cBitPerWord, unsigned char * rgRX, int cRX)",
   "int FDwfDigitalSpiReadOne(HDWF hdwf, int cDQ, int cBitPerWord, unsigned int * pRX)",
+  "int FDwfDigitalSpiReadOne64(HDWF hdwf, int cDQ, int cBitPerWord, unsigned long long * pRX)",
   "int FDwfDigitalSpiRead16(HDWF hdwf, int cDQ, int cBitPerWord, unsigned short * rgRX, int cRX)",
   "int FDwfDigitalSpiRead32(HDWF hdwf, int cDQ, int cBitPerWord, unsigned int * rgRX, int cRX)",
   "int FDwfDigitalSpiWrite(HDWF hdwf, int cDQ, int cBitPerWord, unsigned char * rgTX, int cTX)",
   "int FDwfDigitalSpiWriteOne(HDWF hdwf, int cDQ, int cBits, unsigned int vTX)",
+  "int FDwfDigitalSpiWriteOne64(HDWF hdwf, int cDQ, int cBits, unsigned long long vTX)",
   "int FDwfDigitalSpiWrite16(HDWF hdwf, int cDQ, int cBitPerWord, unsigned short * rgTX, int cTX)",
   "int FDwfDigitalSpiWrite32(HDWF hdwf, int cDQ, int cBitPerWord, unsigned int * rgTX, int cTX)",
+  "int FDwfDigitalSpiWrite64(HDWF hdwf, int cDQ, int cBitPerWord, unsigned long long * rgTX, int cTX)",
   "int FDwfDigitalSpiCmdWriteRead(HDWF hdwf, int cBitCmd, unsigned int cmd, int cDummy, int cDQ, int cBitPerWord, unsigned char * rgTX, int cTX, unsigned char * rgRX, int cRX)",
   "int FDwfDigitalSpiCmdWriteRead16(HDWF hdwf, int cBitCmd, unsigned int cmd, int cDummy, int cDQ, int cBitPerWord, unsigned short * rgTX, int cTX, unsigned short * rgRX, int cRX)",
   "int FDwfDigitalSpiCmdWriteRead32(HDWF hdwf, int cBitCmd, unsigned int cmd, int cDummy, int cDQ, int cBitPerWord, unsigned int * rgTX, int cTX, unsigned int * rgRX, int cRX)",
+  "int FDwfDigitalSpiCmdWriteRead64(HDWF hdwf, int cBitCmd, unsigned long long cmd, int cDummy, int cDQ, int cBitPerWord, unsigned long long * rgTX, int cTX, unsigned long long * rgRX, int cRX)",
   "int FDwfDigitalSpiCmdRead(HDWF hdwf, int cBitCmd, unsigned int cmd, int cDummy, int cDQ, int cBitPerWord, unsigned char * rgRX, int cRX)",
   "int FDwfDigitalSpiCmdReadOne(HDWF hdwf, int cBitCmd, unsigned int cmd, int cDummy, int cDQ, int cBitPerWord, unsigned int * pRX)",
+  "int FDwfDigitalSpiCmdReadOne64(HDWF hdwf, int cBitCmd, unsigned long long cmd, int cDummy, int cDQ, int cBitPerWord, unsigned long long * pRX)",
   "int FDwfDigitalSpiCmdRead16(HDWF hdwf, int cBitCmd, unsigned int cmd, int cDummy, int cDQ, int cBitPerWord, unsigned short * rgRX, int cRX)",
   "int FDwfDigitalSpiCmdRead32(HDWF hdwf, int cBitCmd, unsigned int cmd, int cDummy, int cDQ, int cBitPerWord, unsigned int * rgRX, int cRX)",
+  "int FDwfDigitalSpiCmdRead64(HDWF hdwf, int cBitCmd, unsigned long long cmd, int cDummy, int cDQ, int cBitPerWord, unsigned long long * rgRX, int cRX)",
   "int FDwfDigitalSpiCmdWrite(HDWF hdwf, int cBitCmd, unsigned int cmd, int cDummy, int cDQ, int cBitPerWord, unsigned char * rgTX, int cTX)",
   "int FDwfDigitalSpiCmdWriteOne(HDWF hdwf, int cBitCmd, unsigned int cmd, int cDummy, int cDQ, int cBits, unsigned int vTX)",
+  "int FDwfDigitalSpiCmdWriteOne64(HDWF hdwf, int cBitCmd, unsigned long long cmd, int cDummy, int cDQ, int cBits, unsigned long long vTX)",
   "int FDwfDigitalSpiCmdWrite16(HDWF hdwf, int cBitCmd, unsigned int cmd, int cDummy, int cDQ, int cBitPerWord, unsigned short * rgTX, int cTX)",
   "int FDwfDigitalSpiCmdWrite32(HDWF hdwf, int cBitCmd, unsigned int cmd, int cDummy, int cDQ, int cBitPerWord, unsigned int * rgTX, int cTX)",
+  "int FDwfDigitalSpiCmdWrite64(HDWF hdwf, int cBitCmd, unsigned long long cmd, int cDummy, int cDQ, int cBitPerWord, unsigned long long * rgTX, int cTX)",
   "int FDwfDigitalI2cReset(HDWF hdwf)",
   "int FDwfDigitalI2cClear(HDWF hdwf, int * pfFree)",
   "int FDwfDigitalI2cStretchSet(HDWF hdwf, int fEnable)",
   "int FDwfDigitalI2cRateSet(HDWF hdwf, double hz)",
-  "int FDwfDigitalI2cReadNakSet(HDWF hdwf, int fNakLastReadByte)",
+  "int FDwfDigitalI2cReadNakSet(HDWF hdwf, int fNackLastReadByte)",
   "int FDwfDigitalI2cSclSet(HDWF hdwf, int idxChannel)",
   "int FDwfDigitalI2cSdaSet(HDWF hdwf, int idxChannel)",
   "int FDwfDigitalI2cTimeoutSet(HDWF hdwf, double sec)",
-  "int FDwfDigitalI2cWriteRead(HDWF hdwf, unsigned char adr8bits, unsigned char * rgbTx, int cTx, unsigned char * rgRx, int cRx, int * pNak)",
-  "int FDwfDigitalI2cRead(HDWF hdwf, unsigned char adr8bits, unsigned char * rgbRx, int cRx, int * pNak)",
-  "int FDwfDigitalI2cWrite(HDWF hdwf, unsigned char adr8bits, unsigned char * rgbTx, int cTx, int * pNak)",
-  "int FDwfDigitalI2cWriteOne(HDWF hdwf, unsigned char adr8bits, unsigned char bTx, int * pNak)",
+  "int FDwfDigitalI2cWriteRead(HDWF hdwf, unsigned char adr8bits, unsigned char * rgbTx, int cTx, unsigned char * rgRx, int cRx, int * pNack)",
+  "int FDwfDigitalI2cRead(HDWF hdwf, unsigned char adr8bits, unsigned char * rgbRx, int cRx, int * pNack)",
+  "int FDwfDigitalI2cWrite(HDWF hdwf, unsigned char adr8bits, unsigned char * rgbTx, int cTx, int * pNack)",
+  "int FDwfDigitalI2cWriteOne(HDWF hdwf, unsigned char adr8bits, unsigned char bTx, int * pNack)",
   "int FDwfDigitalI2cSpyStart(HDWF hdwf)",
-  "int FDwfDigitalI2cSpyStatus(HDWF hdwf, int * fStart, int * fStop, unsigned char * rgData, int * cData, int * iNak)",
+  "int FDwfDigitalI2cSpyStatus(HDWF hdwf, int * fStart, int * fStop, unsigned char * rgData, int * cData, int * iNack)",
   "int FDwfDigitalCanReset(HDWF hdwf)",
   "int FDwfDigitalCanRateSet(HDWF hdwf, double hz)",
   "int FDwfDigitalCanPolaritySet(HDWF hdwf, int fHigh)",
@@ -849,6 +900,8 @@ export const PROTOTYPES: string[] = [
   "int FDwfAnalogImpedanceStatusInput(HDWF hdwf, int idxChannel, double * pgain, double * pradian)",
   "int FDwfAnalogImpedanceStatusWarning(HDWF hdwf, int idxChannel, int * pWarning)",
   "int FDwfAnalogImpedanceStatusMeasure(HDWF hdwf, DwfAnalogImpedance measure, double * pvalue)",
+  "int FDwfAnalogImpedanceEnableSet(HDWF hdwf, int fEnable)",
+  "int FDwfAnalogImpedanceEnableGet(HDWF hdwf, int * pfEnable)",
   "int FDwfSpectrumWindow(double * rgdWin, int cdWin, DwfWindow iWindow, const double vBeta, double * vNEBW)",
   "int FDwfSpectrumFFT(const double * rgdData, int cdData, double * rgdBin, double * rgdPhase, int cdBin)",
   "int FDwfSpectrumTransform(const double * rgdData, int cdData, double * rgdBin, double * rgdPhase, int cdBin, double iFirst, double iLast)",
@@ -1070,6 +1123,9 @@ export interface DwfRaw {
   FDwfAnalogOutIdleInfo(hdwf: number, idxChannel: number, pfsidle: Int32Array): number
   FDwfAnalogOutIdleSet(hdwf: number, idxChannel: number, idle: number): number
   FDwfAnalogOutIdleGet(hdwf: number, idxChannel: number, pidle: Int32Array): number
+  FDwfAnalogOutSlewInfo(hdwf: number, idxChannel: number, pMin: Float64Array, pMax: Float64Array): number
+  FDwfAnalogOutSlewSet(hdwf: number, idxChannel: number, vsSlew: number): number
+  FDwfAnalogOutSlewGet(hdwf: number, idxChannel: number, pvsSlew: Float64Array): number
   /** use IsBitSet */
   FDwfAnalogOutNodeInfo(hdwf: number, idxChannel: number, pfsnode: Int32Array): number
   FDwfAnalogOutNodeEnableSet(hdwf: number, idxChannel: number, node: number, fMode: number): number
@@ -1172,6 +1228,8 @@ export interface DwfRaw {
   FDwfDigitalInClockSourceInfo(hdwf: number, pfsDwfDigitalInClockSource: Int32Array): number
   FDwfDigitalInClockSourceSet(hdwf: number, v: number): number
   FDwfDigitalInClockSourceGet(hdwf: number, pv: Int32Array): number
+  FDwfDigitalInSamplingSet(hdwf: number, trigsrc: number, slope: number, sDelay: number): number
+  FDwfDigitalInSamplingGet(hdwf: number, trigsrc: Uint8Array, slope: Int32Array, sDelay: Float64Array): number
   FDwfDigitalInDividerInfo(hdwf: number, pdivMax: Uint32Array): number
   FDwfDigitalInDividerSet(hdwf: number, div: number): number
   FDwfDigitalInDividerGet(hdwf: number, pdiv: Uint32Array): number
@@ -1277,6 +1335,8 @@ export interface DwfRaw {
   FDwfDigitalOutPlayDataSet(hdwf: number, rgBits: Uint8Array, bitPerSample: number, countOfSamples: number): number
   FDwfDigitalOutPlayUpdateSet(hdwf: number, rgBits: Uint8Array, indexOfSample: number, countOfSamples: number): number
   FDwfDigitalOutPlayRateSet(hdwf: number, hzRate: number): number
+  FDwfDigitalOutPlayStatus(hdwf: number, cdDataFree: Int32Array, cdDataLost: Int32Array, cdDataCorrupted: Int32Array): number
+  FDwfDigitalOutSamplingSet(hdwf: number, trigsrc: number, slope: number, sDelay: number): number
   FDwfDigitalUartReset(hdwf: number): number
   FDwfDigitalUartRateSet(hdwf: number, hz: number): number
   FDwfDigitalUartBitsSet(hdwf: number, cBits: number): number
@@ -1289,6 +1349,8 @@ export interface DwfRaw {
   FDwfDigitalUartRxSet(hdwf: number, idxChannel: number): number
   FDwfDigitalUartTx(hdwf: number, szTx: Buffer, cTx: number): number
   FDwfDigitalUartRx(hdwf: number, szRx: Buffer, cRx: number, pcRx: Int32Array, pParity: Int32Array): number
+  FDwfDigitalUartTx16(hdwf: number, szTx: Uint16Array, cTx: number): number
+  FDwfDigitalUartRx16(hdwf: number, szRx: Uint16Array, cRx: number, pcRx: Int32Array, pParity: Int32Array): number
   FDwfDigitalSpiReset(hdwf: number): number
   FDwfDigitalSpiFrequencySet(hdwf: number, hz: number): number
   FDwfDigitalSpiClockSet(hdwf: number, idxChannel: number): number
@@ -1303,44 +1365,54 @@ export interface DwfRaw {
   FDwfDigitalSpiDelaySet(hdwf: number, cStart: number, cCmd: number, cWord: number, cStop: number): number
   /** chip select DIO, idle 0-low 1-high */
   FDwfDigitalSpiSelectSet(hdwf: number, idxSelect: number, fIdle: number): number
+  FDwfDigitalSpiDutySet(hdwf: number, prcDuty: number): number
   /** software control for select 0 low, 1 high, -1 Z */
   FDwfDigitalSpiSelect(hdwf: number, idxChannel: number, level: number): number
   FDwfDigitalSpiWriteRead(hdwf: number, cDQ: number, cBitPerWord: number, rgTX: Uint8Array, cTX: number, rgRX: Uint8Array, cRX: number): number
   FDwfDigitalSpiWriteRead16(hdwf: number, cDQ: number, cBitPerWord: number, rgTX: Uint16Array, cTX: number, rgRX: Uint16Array, cRX: number): number
   FDwfDigitalSpiWriteRead32(hdwf: number, cDQ: number, cBitPerWord: number, rgTX: Uint32Array, cTX: number, rgRX: Uint32Array, cRX: number): number
+  FDwfDigitalSpiWriteRead64(hdwf: number, cDQ: number, cBitPerWord: number, rgTX: BigUint64Array, cTX: number, rgRX: BigUint64Array, cRX: number): number
   FDwfDigitalSpiRead(hdwf: number, cDQ: number, cBitPerWord: number, rgRX: Uint8Array, cRX: number): number
   FDwfDigitalSpiReadOne(hdwf: number, cDQ: number, cBitPerWord: number, pRX: Uint32Array): number
+  FDwfDigitalSpiReadOne64(hdwf: number, cDQ: number, cBitPerWord: number, pRX: BigUint64Array): number
   FDwfDigitalSpiRead16(hdwf: number, cDQ: number, cBitPerWord: number, rgRX: Uint16Array, cRX: number): number
   FDwfDigitalSpiRead32(hdwf: number, cDQ: number, cBitPerWord: number, rgRX: Uint32Array, cRX: number): number
   FDwfDigitalSpiWrite(hdwf: number, cDQ: number, cBitPerWord: number, rgTX: Uint8Array, cTX: number): number
   FDwfDigitalSpiWriteOne(hdwf: number, cDQ: number, cBits: number, vTX: number): number
+  FDwfDigitalSpiWriteOne64(hdwf: number, cDQ: number, cBits: number, vTX: number | bigint): number
   FDwfDigitalSpiWrite16(hdwf: number, cDQ: number, cBitPerWord: number, rgTX: Uint16Array, cTX: number): number
   FDwfDigitalSpiWrite32(hdwf: number, cDQ: number, cBitPerWord: number, rgTX: Uint32Array, cTX: number): number
+  FDwfDigitalSpiWrite64(hdwf: number, cDQ: number, cBitPerWord: number, rgTX: BigUint64Array, cTX: number): number
   FDwfDigitalSpiCmdWriteRead(hdwf: number, cBitCmd: number, cmd: number, cDummy: number, cDQ: number, cBitPerWord: number, rgTX: Uint8Array, cTX: number, rgRX: Uint8Array, cRX: number): number
   FDwfDigitalSpiCmdWriteRead16(hdwf: number, cBitCmd: number, cmd: number, cDummy: number, cDQ: number, cBitPerWord: number, rgTX: Uint16Array, cTX: number, rgRX: Uint16Array, cRX: number): number
   FDwfDigitalSpiCmdWriteRead32(hdwf: number, cBitCmd: number, cmd: number, cDummy: number, cDQ: number, cBitPerWord: number, rgTX: Uint32Array, cTX: number, rgRX: Uint32Array, cRX: number): number
+  FDwfDigitalSpiCmdWriteRead64(hdwf: number, cBitCmd: number, cmd: number | bigint, cDummy: number, cDQ: number, cBitPerWord: number, rgTX: BigUint64Array, cTX: number, rgRX: BigUint64Array, cRX: number): number
   FDwfDigitalSpiCmdRead(hdwf: number, cBitCmd: number, cmd: number, cDummy: number, cDQ: number, cBitPerWord: number, rgRX: Uint8Array, cRX: number): number
   FDwfDigitalSpiCmdReadOne(hdwf: number, cBitCmd: number, cmd: number, cDummy: number, cDQ: number, cBitPerWord: number, pRX: Uint32Array): number
+  FDwfDigitalSpiCmdReadOne64(hdwf: number, cBitCmd: number, cmd: number | bigint, cDummy: number, cDQ: number, cBitPerWord: number, pRX: BigUint64Array): number
   FDwfDigitalSpiCmdRead16(hdwf: number, cBitCmd: number, cmd: number, cDummy: number, cDQ: number, cBitPerWord: number, rgRX: Uint16Array, cRX: number): number
   FDwfDigitalSpiCmdRead32(hdwf: number, cBitCmd: number, cmd: number, cDummy: number, cDQ: number, cBitPerWord: number, rgRX: Uint32Array, cRX: number): number
+  FDwfDigitalSpiCmdRead64(hdwf: number, cBitCmd: number, cmd: number | bigint, cDummy: number, cDQ: number, cBitPerWord: number, rgRX: BigUint64Array, cRX: number): number
   FDwfDigitalSpiCmdWrite(hdwf: number, cBitCmd: number, cmd: number, cDummy: number, cDQ: number, cBitPerWord: number, rgTX: Uint8Array, cTX: number): number
   FDwfDigitalSpiCmdWriteOne(hdwf: number, cBitCmd: number, cmd: number, cDummy: number, cDQ: number, cBits: number, vTX: number): number
+  FDwfDigitalSpiCmdWriteOne64(hdwf: number, cBitCmd: number, cmd: number | bigint, cDummy: number, cDQ: number, cBits: number, vTX: number | bigint): number
   FDwfDigitalSpiCmdWrite16(hdwf: number, cBitCmd: number, cmd: number, cDummy: number, cDQ: number, cBitPerWord: number, rgTX: Uint16Array, cTX: number): number
   FDwfDigitalSpiCmdWrite32(hdwf: number, cBitCmd: number, cmd: number, cDummy: number, cDQ: number, cBitPerWord: number, rgTX: Uint32Array, cTX: number): number
+  FDwfDigitalSpiCmdWrite64(hdwf: number, cBitCmd: number, cmd: number | bigint, cDummy: number, cDQ: number, cBitPerWord: number, rgTX: BigUint64Array, cTX: number): number
   FDwfDigitalI2cReset(hdwf: number): number
   FDwfDigitalI2cClear(hdwf: number, pfFree: Int32Array): number
   FDwfDigitalI2cStretchSet(hdwf: number, fEnable: number): number
   FDwfDigitalI2cRateSet(hdwf: number, hz: number): number
-  FDwfDigitalI2cReadNakSet(hdwf: number, fNakLastReadByte: number): number
+  FDwfDigitalI2cReadNakSet(hdwf: number, fNackLastReadByte: number): number
   FDwfDigitalI2cSclSet(hdwf: number, idxChannel: number): number
   FDwfDigitalI2cSdaSet(hdwf: number, idxChannel: number): number
   FDwfDigitalI2cTimeoutSet(hdwf: number, sec: number): number
-  FDwfDigitalI2cWriteRead(hdwf: number, adr8bits: number, rgbTx: Uint8Array, cTx: number, rgRx: Uint8Array, cRx: number, pNak: Int32Array): number
-  FDwfDigitalI2cRead(hdwf: number, adr8bits: number, rgbRx: Uint8Array, cRx: number, pNak: Int32Array): number
-  FDwfDigitalI2cWrite(hdwf: number, adr8bits: number, rgbTx: Uint8Array, cTx: number, pNak: Int32Array): number
-  FDwfDigitalI2cWriteOne(hdwf: number, adr8bits: number, bTx: number, pNak: Int32Array): number
+  FDwfDigitalI2cWriteRead(hdwf: number, adr8bits: number, rgbTx: Uint8Array, cTx: number, rgRx: Uint8Array, cRx: number, pNack: Int32Array): number
+  FDwfDigitalI2cRead(hdwf: number, adr8bits: number, rgbRx: Uint8Array, cRx: number, pNack: Int32Array): number
+  FDwfDigitalI2cWrite(hdwf: number, adr8bits: number, rgbTx: Uint8Array, cTx: number, pNack: Int32Array): number
+  FDwfDigitalI2cWriteOne(hdwf: number, adr8bits: number, bTx: number, pNack: Int32Array): number
   FDwfDigitalI2cSpyStart(hdwf: number): number
-  FDwfDigitalI2cSpyStatus(hdwf: number, fStart: Int32Array, fStop: Int32Array, rgData: Uint8Array, cData: Int32Array, iNak: Int32Array): number
+  FDwfDigitalI2cSpyStatus(hdwf: number, fStart: Int32Array, fStop: Int32Array, rgData: Uint8Array, cData: Int32Array, iNack: Int32Array): number
   FDwfDigitalCanReset(hdwf: number): number
   FDwfDigitalCanRateSet(hdwf: number, hz: number): number
   /** 0 low, 1 high */
@@ -1386,6 +1458,8 @@ export interface DwfRaw {
   FDwfAnalogImpedanceStatusInput(hdwf: number, idxChannel: number, pgain: Float64Array, pradian: Float64Array): number
   FDwfAnalogImpedanceStatusWarning(hdwf: number, idxChannel: number, pWarning: Int32Array): number
   FDwfAnalogImpedanceStatusMeasure(hdwf: number, measure: number, pvalue: Float64Array): number
+  FDwfAnalogImpedanceEnableSet(hdwf: number, fEnable: number): number
+  FDwfAnalogImpedanceEnableGet(hdwf: number, pfEnable: Int32Array): number
   FDwfSpectrumWindow(rgdWin: Float64Array, cdWin: number, iWindow: number, vBeta: number, vNEBW: Float64Array): number
   FDwfSpectrumFFT(rgdData: Float64Array | number[], cdData: number, rgdBin: Float64Array, rgdPhase: Float64Array, cdBin: number): number
   FDwfSpectrumTransform(rgdData: Float64Array | number[], cdData: number, rgdBin: Float64Array, rgdPhase: Float64Array, cdBin: number, iFirst: number, iLast: number): number

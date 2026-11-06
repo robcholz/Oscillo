@@ -1,3 +1,4 @@
+
 /************************************************************************/
 /*                                                                      */
 /*    dwf.h  --    Public Interface Declarations for DWF.DLL            */
@@ -76,6 +77,9 @@ const DEVID devidDiscovery3 = 10;
 const DEVID devidADP5470    = 11;
 const DEVID devidADP5490    = 12;
 const DEVID devidADP2230    = 14;
+const DEVID devidADSMax     = 15;
+const DEVID devidADP2440    = 16;
+const DEVID devidADP2450    = 17;
 
 // device version
 typedef int DEVVER;
@@ -106,6 +110,7 @@ const TRIGSRC trigsrcExternal4          = 14;
 const TRIGSRC trigsrcHigh               = 15;
 const TRIGSRC trigsrcLow                = 16;
 const TRIGSRC trigsrcClock              = 17;
+const TRIGSRC trigsrcDIO                = 32;
 
 // instrument states:
 typedef unsigned char DwfState;
@@ -196,6 +201,8 @@ const FUNC funcPulse    = 7;
 const FUNC funcTrapezium= 8;
 const FUNC funcSinePower= 9;
 const FUNC funcSineNA   = 10;
+const FUNC funcDualCustom = 26;
+const FUNC funcDualPattern = 27;
 const FUNC funcCustomPattern = 28;
 const FUNC funcPlayPattern = 29;
 const FUNC funcCustom   = 30;
@@ -232,6 +239,8 @@ const ANALOGIO analogioTime         = 9;
 const ANALOGIO analogioFrequency    = 10;
 const ANALOGIO analogioResistance   = 11;
 const ANALOGIO analogioSlew         = 12;
+const ANALOGIO analogioRPM          = 13;
+const ANALOGIO analogioPercent      = 14;
 
 typedef int DwfDmm;
 const DwfDmm DwfDmmResistance     = 1;
@@ -292,14 +301,14 @@ const DwfDigitalOutIdle DwfDigitalOutIdleHigh     = 2;
 const DwfDigitalOutIdle DwfDigitalOutIdleZet      = 3;
 
 typedef int DwfAnalogImpedance;
-const DwfAnalogImpedance DwfAnalogImpedanceImpedance = 0; // Ohms
+const DwfAnalogImpedance DwfAnalogImpedanceImpedance = 0; // Z Ohms
 const DwfAnalogImpedance DwfAnalogImpedanceImpedancePhase = 1; // Radians
-const DwfAnalogImpedance DwfAnalogImpedanceResistance = 2; // Ohms
-const DwfAnalogImpedance DwfAnalogImpedanceReactance = 3; // Ohms
+const DwfAnalogImpedance DwfAnalogImpedanceResistance = 2; // Rs Ohms
+const DwfAnalogImpedance DwfAnalogImpedanceReactance = 3; // Xs Ohms
 const DwfAnalogImpedance DwfAnalogImpedanceAdmittance = 4; // Siemen
 const DwfAnalogImpedance DwfAnalogImpedanceAdmittancePhase = 5; // Radians
-const DwfAnalogImpedance DwfAnalogImpedanceConductance = 6; // Siemen
-const DwfAnalogImpedance DwfAnalogImpedanceSusceptance = 7; // Siemen
+const DwfAnalogImpedance DwfAnalogImpedanceConductance = 6; // Gp Siemen
+const DwfAnalogImpedance DwfAnalogImpedanceSusceptance = 7; // Bp Siemen
 const DwfAnalogImpedance DwfAnalogImpedanceSeriesCapacitance = 8; // Farad
 const DwfAnalogImpedance DwfAnalogImpedanceParallelCapacitance = 9; // Farad
 const DwfAnalogImpedance DwfAnalogImpedanceSeriesInductance = 10; // Henry
@@ -324,9 +333,20 @@ const DwfParam DwfParamFrequency       = 8; // Hz
 const DwfParam DwfParamExtFreq         = 9; // Hz
 const DwfParam DwfParamClockMode       = 10; // 0 internal, 1 output, 2 input, 3 IO
 const DwfParam DwfParamTempLimit       = 11;
-const DwfParam DwfParamFreqPhase       = 12;
+const DwfParam DwfParamFreqPhase       = 12; // mDegree 0..360000
 const DwfParam DwfParamDigitalVoltage  = 13; // mV
 const DwfParam DwfParamFreqPhaseSteps  = 14; // readonly
+const DwfParam DwfParamDigitalThreshold= 15; // mV
+const DwfParam DwfParamFanTemp         = 16; // *C temperature set
+const DwfParam DwfParamFanMin          = 17; // RPM 0 default
+const DwfParam DwfParamFanMax          = 18; // RPM
+const DwfParam DwfParamDigFrequency    = 19; // Hz
+const DwfParam DwfParamFanDuty         = 20; // m%
+const DwfParam DwfParamCompFreq        = 21; // Hz compensation output
+const DwfParam DwfParamCompDuty        = 22; // m% compensation output
+const DwfParam DwfParamFanCtrl         = 23; // 0 default, 1 duty, 2,3,4,5 temperature sensors
+const DwfParam DwfParamSleep           = 24; // seconds, idle time for device shutdown
+const DwfParam DwfParamDACFrequency    = 25; // Hz
 
 typedef int DwfWindow;
 const DwfWindow DwfWindowRectangular    = 0;
@@ -351,6 +371,7 @@ const DwfFiirMode DwfFiirWindow         = 0;
 const DwfFiirMode DwfFiirFir            = 1;
 const DwfFiirMode DwfFiirIirButterworth = 2;
 const DwfFiirMode DwfFiirIirChebyshev   = 3;
+const DwfFiirMode DwfFiirPole           = 4;
 
 typedef int DwfFiirType;
 const DwfFiirType DwfFiirLowPass    = 0;
@@ -593,6 +614,10 @@ DWFAPI int FDwfAnalogOutIdleInfo(HDWF hdwf, int idxChannel, int *pfsidle);
 DWFAPI int FDwfAnalogOutIdleSet(HDWF hdwf, int idxChannel, DwfAnalogOutIdle idle);
 DWFAPI int FDwfAnalogOutIdleGet(HDWF hdwf, int idxChannel, DwfAnalogOutIdle *pidle);
 
+DWFAPI int FDwfAnalogOutSlewInfo(HDWF hdwf, int idxChannel, double *pMin, double *pMax);
+DWFAPI int FDwfAnalogOutSlewSet(HDWF hdwf, int idxChannel, double vsSlew);
+DWFAPI int FDwfAnalogOutSlewGet(HDWF hdwf, int idxChannel, double *pvsSlew);
+
 DWFAPI int FDwfAnalogOutNodeInfo(HDWF hdwf, int idxChannel, int *pfsnode); // use IsBitSet
 
 // Mode: 0 Disable, 1 Enable
@@ -727,6 +752,9 @@ DWFAPI int FDwfDigitalInInternalClockInfo(HDWF hdwf, double *phzFreq);
 DWFAPI int FDwfDigitalInClockSourceInfo(HDWF hdwf, int *pfsDwfDigitalInClockSource); // use IsBitSet
 DWFAPI int FDwfDigitalInClockSourceSet(HDWF hdwf, DwfDigitalInClockSource v);
 DWFAPI int FDwfDigitalInClockSourceGet(HDWF hdwf, DwfDigitalInClockSource *pv);
+
+DWFAPI int FDwfDigitalInSamplingSet(HDWF hdwf, TRIGSRC trigsrc, DwfTriggerSlope slope, double sDelay);
+DWFAPI int FDwfDigitalInSamplingGet(HDWF hdwf, TRIGSRC *trigsrc, DwfTriggerSlope *slope, double *sDelay);
 
 DWFAPI int FDwfDigitalInDividerInfo(HDWF hdwf, unsigned int *pdivMax);
 DWFAPI int FDwfDigitalInDividerSet(HDWF hdwf, unsigned int div);
@@ -869,6 +897,9 @@ DWFAPI int FDwfDigitalOutDataSet(HDWF hdwf, int idxChannel, void *rgBits, unsign
 DWFAPI int FDwfDigitalOutPlayDataSet(HDWF hdwf, unsigned char *rgBits, unsigned int bitPerSample, unsigned int countOfSamples);
 DWFAPI int FDwfDigitalOutPlayUpdateSet(HDWF hdwf, unsigned char *rgBits, unsigned int indexOfSample, unsigned int countOfSamples);
 DWFAPI int FDwfDigitalOutPlayRateSet(HDWF hdwf, double hzRate);
+DWFAPI int FDwfDigitalOutPlayStatus(HDWF hdwf, int *cdDataFree, int *cdDataLost, int *cdDataCorrupted);
+
+DWFAPI int FDwfDigitalOutSamplingSet(HDWF hdwf, TRIGSRC trigsrc, DwfTriggerSlope slope, double sDelay);
 
 // UART
 DWFAPI int FDwfDigitalUartReset(HDWF hdwf);
@@ -882,6 +913,8 @@ DWFAPI int FDwfDigitalUartRxSet(HDWF hdwf, int idxChannel);
 
 DWFAPI int FDwfDigitalUartTx(HDWF hdwf, char *szTx, int cTx);
 DWFAPI int FDwfDigitalUartRx(HDWF hdwf, char *szRx, int cRx, int *pcRx, int *pParity);
+DWFAPI int FDwfDigitalUartTx16(HDWF hdwf, unsigned short *szTx, int cTx);
+DWFAPI int FDwfDigitalUartRx16(HDWF hdwf, unsigned short *szRx, int cRx, int *pcRx, int *pParity);
 
 // SPI
 DWFAPI int FDwfDigitalSpiReset(HDWF hdwf);
@@ -893,32 +926,42 @@ DWFAPI int FDwfDigitalSpiModeSet(HDWF hdwf, int iMode); // bit1 CPOL, bit0 CPHA
 DWFAPI int FDwfDigitalSpiOrderSet(HDWF hdwf, int fMSBFirst); // bit order: 1 MSB first, 0 LSB first
 DWFAPI int FDwfDigitalSpiDelaySet(HDWF hdwf, int cStart, int cCmd, int cWord, int cStop); // clock cycle delay
 DWFAPI int FDwfDigitalSpiSelectSet(HDWF hdwf, int idxSelect, int fIdle); // chip select DIO, idle 0-low 1-high
+DWFAPI int FDwfDigitalSpiDutySet(HDWF hdwf, int prcDuty);
 
 DWFAPI int FDwfDigitalSpiSelect(HDWF hdwf, int idxChannel, int level); // software control for select 0 low, 1 high, -1 Z
 // cDQ 0 SISO, 1 MOSI/MISO, 2 dual, 4 quad, // 1-32 bits / word
 DWFAPI int FDwfDigitalSpiWriteRead(HDWF hdwf, int cDQ, int cBitPerWord, unsigned char *rgTX, int cTX, unsigned char *rgRX, int cRX);
 DWFAPI int FDwfDigitalSpiWriteRead16(HDWF hdwf, int cDQ, int cBitPerWord, unsigned short *rgTX, int cTX, unsigned short *rgRX, int cRX);
 DWFAPI int FDwfDigitalSpiWriteRead32(HDWF hdwf, int cDQ, int cBitPerWord, unsigned int *rgTX, int cTX, unsigned int *rgRX, int cRX);
+DWFAPI int FDwfDigitalSpiWriteRead64(HDWF hdwf, int cDQ, int cBitPerWord, unsigned long long *rgTX, int cTX, unsigned long long *rgRX, int cRX);
 DWFAPI int FDwfDigitalSpiRead(HDWF hdwf, int cDQ, int cBitPerWord, unsigned char *rgRX, int cRX);
 DWFAPI int FDwfDigitalSpiReadOne(HDWF hdwf, int cDQ, int cBitPerWord, unsigned int *pRX);
+DWFAPI int FDwfDigitalSpiReadOne64(HDWF hdwf, int cDQ, int cBitPerWord, unsigned long long *pRX);
 DWFAPI int FDwfDigitalSpiRead16(HDWF hdwf, int cDQ, int cBitPerWord, unsigned short *rgRX, int cRX);
 DWFAPI int FDwfDigitalSpiRead32(HDWF hdwf, int cDQ, int cBitPerWord, unsigned int *rgRX, int cRX);
 DWFAPI int FDwfDigitalSpiWrite(HDWF hdwf, int cDQ, int cBitPerWord, unsigned char *rgTX, int cTX);
 DWFAPI int FDwfDigitalSpiWriteOne(HDWF hdwf, int cDQ, int cBits, unsigned int vTX);
+DWFAPI int FDwfDigitalSpiWriteOne64(HDWF hdwf, int cDQ, int cBits, unsigned long long vTX);
 DWFAPI int FDwfDigitalSpiWrite16(HDWF hdwf, int cDQ, int cBitPerWord, unsigned short *rgTX, int cTX);
 DWFAPI int FDwfDigitalSpiWrite32(HDWF hdwf, int cDQ, int cBitPerWord, unsigned int *rgTX, int cTX);
+DWFAPI int FDwfDigitalSpiWrite64(HDWF hdwf, int cDQ, int cBitPerWord, unsigned long long *rgTX, int cTX);
 
 DWFAPI int FDwfDigitalSpiCmdWriteRead(HDWF hdwf, int cBitCmd, unsigned int cmd, int cDummy, int cDQ, int cBitPerWord, unsigned char *rgTX, int cTX, unsigned char *rgRX, int cRX);
 DWFAPI int FDwfDigitalSpiCmdWriteRead16(HDWF hdwf, int cBitCmd, unsigned int cmd, int cDummy, int cDQ, int cBitPerWord, unsigned short *rgTX, int cTX, unsigned short *rgRX, int cRX);
 DWFAPI int FDwfDigitalSpiCmdWriteRead32(HDWF hdwf, int cBitCmd, unsigned int cmd, int cDummy, int cDQ, int cBitPerWord, unsigned int *rgTX, int cTX, unsigned int *rgRX, int cRX);
+DWFAPI int FDwfDigitalSpiCmdWriteRead64(HDWF hdwf, int cBitCmd, unsigned long long cmd, int cDummy, int cDQ, int cBitPerWord, unsigned long long *rgTX, int cTX, unsigned long long *rgRX, int cRX);
 DWFAPI int FDwfDigitalSpiCmdRead(HDWF hdwf, int cBitCmd, unsigned int cmd, int cDummy, int cDQ, int cBitPerWord, unsigned char *rgRX, int cRX);
 DWFAPI int FDwfDigitalSpiCmdReadOne(HDWF hdwf, int cBitCmd, unsigned int cmd, int cDummy, int cDQ, int cBitPerWord, unsigned int *pRX);
+DWFAPI int FDwfDigitalSpiCmdReadOne64(HDWF hdwf, int cBitCmd, unsigned long long cmd, int cDummy, int cDQ, int cBitPerWord, unsigned long long *pRX);
 DWFAPI int FDwfDigitalSpiCmdRead16(HDWF hdwf, int cBitCmd, unsigned int cmd, int cDummy, int cDQ, int cBitPerWord, unsigned short *rgRX, int cRX);
 DWFAPI int FDwfDigitalSpiCmdRead32(HDWF hdwf, int cBitCmd, unsigned int cmd, int cDummy, int cDQ, int cBitPerWord, unsigned int *rgRX, int cRX);
+DWFAPI int FDwfDigitalSpiCmdRead64(HDWF hdwf, int cBitCmd, unsigned long long cmd, int cDummy, int cDQ, int cBitPerWord, unsigned long long *rgRX, int cRX);
 DWFAPI int FDwfDigitalSpiCmdWrite(HDWF hdwf, int cBitCmd, unsigned int cmd, int cDummy, int cDQ, int cBitPerWord, unsigned char *rgTX, int cTX);
 DWFAPI int FDwfDigitalSpiCmdWriteOne(HDWF hdwf, int cBitCmd, unsigned int cmd, int cDummy, int cDQ, int cBits, unsigned int vTX);
+DWFAPI int FDwfDigitalSpiCmdWriteOne64(HDWF hdwf, int cBitCmd, unsigned long long cmd, int cDummy, int cDQ, int cBits, unsigned long long vTX);
 DWFAPI int FDwfDigitalSpiCmdWrite16(HDWF hdwf, int cBitCmd, unsigned int cmd, int cDummy, int cDQ, int cBitPerWord, unsigned short *rgTX, int cTX);
 DWFAPI int FDwfDigitalSpiCmdWrite32(HDWF hdwf, int cBitCmd, unsigned int cmd, int cDummy, int cDQ, int cBitPerWord, unsigned int *rgTX, int cTX);
+DWFAPI int FDwfDigitalSpiCmdWrite64(HDWF hdwf, int cBitCmd, unsigned long long cmd, int cDummy, int cDQ, int cBitPerWord, unsigned long long *rgTX, int cTX);
 
 
 
@@ -927,18 +970,18 @@ DWFAPI int FDwfDigitalI2cReset(HDWF hdwf);
 DWFAPI int FDwfDigitalI2cClear(HDWF hdwf, int *pfFree);
 DWFAPI int FDwfDigitalI2cStretchSet(HDWF hdwf, int fEnable);
 DWFAPI int FDwfDigitalI2cRateSet(HDWF hdwf, double hz);
-DWFAPI int FDwfDigitalI2cReadNakSet(HDWF hdwf, int fNakLastReadByte);
+DWFAPI int FDwfDigitalI2cReadNakSet(HDWF hdwf, int fNackLastReadByte);
 DWFAPI int FDwfDigitalI2cSclSet(HDWF hdwf, int idxChannel);
 DWFAPI int FDwfDigitalI2cSdaSet(HDWF hdwf, int idxChannel);
 DWFAPI int FDwfDigitalI2cTimeoutSet(HDWF hdwf, double sec);
 
-DWFAPI int FDwfDigitalI2cWriteRead(HDWF hdwf, unsigned char adr8bits, unsigned char *rgbTx, int cTx, unsigned char *rgRx, int cRx, int *pNak);
-DWFAPI int FDwfDigitalI2cRead(HDWF hdwf, unsigned char adr8bits, unsigned char *rgbRx, int cRx, int *pNak);
-DWFAPI int FDwfDigitalI2cWrite(HDWF hdwf, unsigned char adr8bits, unsigned char *rgbTx, int cTx, int *pNak);
-DWFAPI int FDwfDigitalI2cWriteOne(HDWF hdwf, unsigned char adr8bits, unsigned char bTx, int *pNak);
+DWFAPI int FDwfDigitalI2cWriteRead(HDWF hdwf, unsigned char adr8bits, unsigned char *rgbTx, int cTx, unsigned char *rgRx, int cRx, int *pNack);
+DWFAPI int FDwfDigitalI2cRead(HDWF hdwf, unsigned char adr8bits, unsigned char *rgbRx, int cRx, int *pNack);
+DWFAPI int FDwfDigitalI2cWrite(HDWF hdwf, unsigned char adr8bits, unsigned char *rgbTx, int cTx, int *pNack);
+DWFAPI int FDwfDigitalI2cWriteOne(HDWF hdwf, unsigned char adr8bits, unsigned char bTx, int *pNack);
 
 DWFAPI int FDwfDigitalI2cSpyStart(HDWF hdwf);
-DWFAPI int FDwfDigitalI2cSpyStatus(HDWF hdwf, int *fStart, int *fStop, unsigned char *rgData, int *cData, int *iNak);
+DWFAPI int FDwfDigitalI2cSpyStatus(HDWF hdwf, int *fStart, int *fStop, unsigned char *rgData, int *cData, int *iNack);
 
 // CAN
 DWFAPI int FDwfDigitalCanReset(HDWF hdwf);
@@ -989,6 +1032,8 @@ DWFAPI int FDwfAnalogImpedanceStatus(HDWF hdwf, DwfState *psts);
 DWFAPI int FDwfAnalogImpedanceStatusInput(HDWF hdwf, int idxChannel, double *pgain, double *pradian);
 DWFAPI int FDwfAnalogImpedanceStatusWarning(HDWF hdwf, int idxChannel, int *pWarning);
 DWFAPI int FDwfAnalogImpedanceStatusMeasure(HDWF hdwf, DwfAnalogImpedance measure, double *pvalue);
+DWFAPI int FDwfAnalogImpedanceEnableSet(HDWF hdwf, int fEnable);
+DWFAPI int FDwfAnalogImpedanceEnableGet(HDWF hdwf, int *pfEnable);
 
 // Miscellaneous
 DWFAPI int FDwfSpectrumWindow(double *rgdWin, int cdWin, DwfWindow iWindow, const double vBeta, double *vNEBW);
