@@ -29,7 +29,7 @@ function Folder({ name, files, cur, onOpen, initial = true }: { name: string; fi
                   className={cn('flex h-8 w-full cursor-pointer items-center gap-2 rounded-small pl-7 pr-2 text-left text-sm', f === cur ? 'bg-gray-alpha-200 text-gray-1000' : 'text-gray-900 hover:bg-gray-alpha-100 hover:text-gray-1000')}
                 >
                   <Icon size={16} className="flex-none" />
-                  <span className="truncate font-mono text-[13px]">{f}</span>
+                  <span className="truncate text-[13px]">{f}</span>
                 </button>
               </li>
             )

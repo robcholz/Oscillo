@@ -125,7 +125,7 @@ export function Header() {
         >
           <Search size={16} className="flex-none" />
           <span className="flex-1 max-[1220px]:hidden">Search…</span>
-          <Kbd small className="max-[1220px]:hidden">⌘K</Kbd>
+          <Kbd small keys={['⌘', 'K']} className="max-[1220px]:hidden" />
         </button>
       </div>
       <div className="flex flex-none items-center gap-2">

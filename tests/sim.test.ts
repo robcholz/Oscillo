@@ -89,3 +89,17 @@ describe('spectrum metrics', () => {
     expect(m.enob).toBeGreaterThan(8)
   })
 })
+
+import { toastType } from '../src/renderer/src/store'
+describe('toast colours', () => {
+  it('matches the design', () => {
+    expect(toastType('Could not save the workspace')).toBe('error')
+    expect(toastType('MCP server could not start')).toBe('error')
+    expect(toastType('Capture failed')).toBe('error')
+    expect(toastType('Device disconnected')).toBe('warning')
+    expect(toastType('All 16 pins are in use')).toBe('warning')
+    expect(toastType('Programmed blinky.bit')).toBe('success')
+    expect(toastType('Workspace saved')).toBe('success')
+    expect(toastType('Cursors removed')).toBeUndefined()
+  })
+})

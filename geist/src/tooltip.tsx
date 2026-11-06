@@ -40,9 +40,7 @@ export function Tooltip({ text, children, position = 'top', delay, keys, disable
         >
           {text}
           {keys && keys.length > 0 && (
-            <Kbd small className="!bg-transparent !text-gray-500 !shadow-[inset_0_0_0_1px_var(--gray-alpha-700)]">
-              {keys.join('')}
-            </Kbd>
+            <Kbd small keys={keys} className="!bg-transparent !text-gray-500 !shadow-[inset_0_0_0_1px_var(--gray-alpha-700)]" />
           )}
           <RadixTooltip.Arrow width={10} height={5} className="fill-gray-1000" />
         </RadixTooltip.Content>

@@ -17,4 +17,10 @@ export type AppCommand =
   | 'single'
   | 'auto-set'
   | 'run-script'
+  | 'about'
+  | 'check-updates'
+  | 'feedback'
+  | 'shortcuts'
+  | 'docs'
+  | 'report-issue'
   | `page:${string}`

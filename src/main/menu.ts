@@ -7,6 +7,8 @@ import { COMMAND, type AppCommand } from '../shared/commands'
 const send = (cmd: AppCommand) => (): void => (BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0])?.webContents.send(COMMAND, cmd)
 const item = (label: string, accelerator: string, cmd: AppCommand): MenuItemConstructorOptions => ({ label, accelerator, click: send(cmd) })
 
+const plain = (label: string, cmd: AppCommand): MenuItemConstructorOptions => ({ label, click: send(cmd) })
+
 const INSTRUMENTS: [string, string][] = [
   ['Scope', 'scope'],
   ['Wavegen', 'wavegen'],
@@ -23,7 +25,7 @@ export function buildMenu(): void {
       ? [
           {
             label: app.name,
-            submenu: [{ role: 'about' }, { type: 'separator' }, item('Settings…', 'CmdOrCtrl+,', 'settings'), { type: 'separator' }, { role: 'services' }, { type: 'separator' }, { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' }]
+            submenu: [plain(`About ${app.name}`, 'about'), plain('Check for Updates…', 'check-updates'), { type: 'separator' }, item('Settings…', 'CmdOrCtrl+,', 'settings'), { type: 'separator' }, { role: 'services' }, { type: 'separator' }, { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' }]
           } satisfies MenuItemConstructorOptions
         ]
       : []),
@@ -59,7 +61,18 @@ export function buildMenu(): void {
         item('Run Script', 'CmdOrCtrl+R', 'run-script')
       ]
     },
-    { role: 'windowMenu' }
+    { role: 'windowMenu' },
+    {
+      role: 'help',
+      submenu: [
+        plain(`${app.name} Documentation`, 'docs'),
+        plain('Keyboard Shortcuts', 'shortcuts'),
+        { type: 'separator' },
+        plain('Send Feedback…', 'feedback'),
+        plain('Report an Issue…', 'report-issue'),
+        ...(mac ? [] : [{ type: 'separator' }, plain(`About ${app.name}`, 'about'), plain('Check for Updates…', 'check-updates')] as MenuItemConstructorOptions[])
+      ]
+    }
   ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }

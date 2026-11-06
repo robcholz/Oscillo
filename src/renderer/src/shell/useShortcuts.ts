@@ -6,6 +6,8 @@ import { useEffect } from 'react'
 import type { AppCommand } from '../../../shared/commands'
 import { pageById, pages, type PageId } from '../routes'
 import { useStore } from '../store'
+import { files } from '../files'
+import { REPO } from '../updates'
 import { useScript } from '../views/script-store'
 import { openWorkspace, saveWorkspace } from '../workspace'
 import { commandForKey, runPageCommand } from './commands'
@@ -37,11 +39,19 @@ export function useShortcuts(): void {
         case 'run-script':
           s.go('script')
           return useScript.getState().runOrContinue()
+        case 'docs':
+          return void files?.external(`https://github.com/${REPO}#readme`)
+        case 'report-issue':
+          return void files?.external(`https://github.com/${REPO}/issues/new`)
+        case 'about':
+        case 'check-updates':
+        case 'feedback':
+        case 'shortcuts':
         case 'single':
         case 'auto-set':
-          // Scope commands: open the Scope first when another page is showing.
+          // Page commands: open their page first when another page is showing.
           if (!runPageCommand(cmd)) {
-            s.go('scope')
+            s.go(cmd === 'single' || cmd === 'auto-set' ? 'scope' : 'settings')
             setTimeout(() => runPageCommand(cmd), 0)
           }
           return

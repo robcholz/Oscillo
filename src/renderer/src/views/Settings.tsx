@@ -8,6 +8,7 @@ import { usePrefs } from '../prefs'
 import { files } from '../files'
 import { useStore } from '../store'
 import { checkRelease, REPO } from '../updates'
+import { useCommand } from '../shell/commands'
 
 
 const SECTIONS = [
@@ -74,6 +75,15 @@ export function Settings() {
   const [about, setAbout] = useState(false)
   const [feedback, setFeedback] = useState(false)
   const [confirmReset, setConfirmReset] = useState(false)
+  // Menu bar items that land here (src/main/menu.ts).
+  const jump = (id: string): void => document.getElementById(`settings-${id}`)?.scrollIntoView({ block: 'start' })
+  useCommand('about', () => setAbout(true))
+  useCommand('feedback', () => setFeedback(true))
+  useCommand('shortcuts', () => jump('shortcuts'))
+  useCommand('check-updates', () => {
+    jump('updates')
+    void checkUpdates()
+  })
 
   // The nav follows the section nearest the top of the scroll area.
   useEffect(() => {
@@ -206,13 +216,7 @@ export function Settings() {
                   <span className="text-sm">{s.a}</span>
                   <span className="flex gap-2" aria-label={s.k.map((c) => c.join('')).join(' or ')}>
                     {s.k.map((c) => (
-                      <Kbd key={c.join('')}>
-                        <span className="flex gap-0.5">
-                          {c.map((k) => (
-                            <span key={k}>{k}</span>
-                          ))}
-                        </span>
-                      </Kbd>
+                      <Kbd key={c.join('')} keys={c} />
                     ))}
                   </span>
                 </div>
