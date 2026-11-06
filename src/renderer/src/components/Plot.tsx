@@ -160,11 +160,11 @@ export function Plot({ x, y, series, height = 'calc(380px + max(0px, (100vh - 90
   const visible = series.filter((s) => !s.hidden)
   const paths = useMemo(() => visible.map((s) => (s.kind === 'bars' ? null : seriesPath(s, x, y, curve === 'Smooth'))), [visible, x, y, curve])
 
-  const yLabels = Array.from({ length: yd + 1 }, (_, i) => {
-    const v = y.log ? fromFrac(1 - i / yd, y) : y.max - (i / yd) * (y.max - y.min)
-    return { pct: (i / yd) * 100, text: y.format ? y.format(v) : tick(v, y.unit, i === 0 || i === yd), edge: i === 0 ? 'top' : i === yd ? 'bottom' : 'mid' }
-  })
-  const xn = x.log ? xd : xd > 5 ? 5 : xd
+  const yVals = Array.from({ length: yd + 1 }, (_, i) => (y.log ? fromFrac(1 - i / yd, y) : y.max - (i / yd) * (y.max - y.min)))
+  // Linear axes share one prefix ("10 mA", "8", "6" … "0 mA"); log axes need it on every decade.
+  const yText = y.format ? yVals.map(y.format) : y.log ? yVals.map((v, i) => tick(v, y.unit, i === 0 || i === yd)) : axisTicks(yVals, y.unit)
+  const yLabels = yVals.map((_, i) => ({ pct: (i / yd) * 100, text: yText[i], edge: i === 0 ? 'top' : i === yd ? 'bottom' : 'mid' }))
+  const xn = xd
   const xVals = Array.from({ length: xn + 1 }, (_, i) => fromFrac(i / xn, x))
   const xTicks = x.format ? xVals.map(x.format) : x.log ? xVals.map((v, i) => tick(v, x.unit, i === 0 || i === xn)) : axisTicks(xVals, x.unit)
 
@@ -333,9 +333,16 @@ export function Plot({ x, y, series, height = 'calc(380px + max(0px, (100vh - 90
           </>
         )}
       </div>
-      <div aria-hidden="true" className="flex justify-between text-xs tabular-nums text-gray-900">
+      {/* One label per gridline, centred under it; every other one drops out when the plot is narrow. */}
+      <div aria-hidden="true" className="@container relative h-4 text-xs leading-4 tabular-nums text-gray-900">
         {xTicks.map((t, i) => (
-          <span key={i}>{t}</span>
+          <span
+            key={i}
+            className={cn('absolute top-0 whitespace-nowrap', i === 0 ? 'left-0' : i === xn ? 'right-0' : '-translate-x-1/2', i % 2 === 1 && i !== xn && xn > 5 && '@max-[560px]:hidden')}
+            style={i === 0 || i === xn ? undefined : { left: `${(i / xn) * 100}%` }}
+          >
+            {t}
+          </span>
         ))}
       </div>
     </figure>

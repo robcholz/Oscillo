@@ -1,7 +1,8 @@
 // Pattern Generator (board: Patterns). One row per signal or bus with type, output drive, idle state,
 // parameters and a live preview, plus a paintable editor for the custom pattern.
+import { useCommand } from '../shell/commands'
 import { Button, DotsMenu, FormModal, Input, Material, MenuItem, MenuSeparator, Note, Select, SplitButton, StatusDot, Toggle, type FormField } from '@robcholz/geist'
-import { ChevronLeft, ChevronRight, Layers, Pencil, Play, Plus, Square, Trash2, Upload } from 'lucide-react'
+import { Layers, Pencil, Play, Plus, Redo2, Square, Trash2, Undo2, Upload } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
@@ -295,6 +296,20 @@ export function Patterns() {
     s.set({ bits: next })
   }
   const custom = s.rows.find((r) => r.type === 'Custom')
+  const undo = (): void => {
+    if (!past.length) return
+    setFuture([s.bits, ...future])
+    s.set({ bits: past[past.length - 1] })
+    setPast(past.slice(0, -1))
+  }
+  const redo = (): void => {
+    if (!future.length) return
+    setPast([...past, s.bits])
+    s.set({ bits: future[0] })
+    setFuture(future.slice(1))
+  }
+  useCommand('undo', undo, !!custom)
+  useCommand('redo', redo, !!custom)
 
   const run = () => {
     if (!app.device) return toast('No device connected', { detail: 'Connect a device, then press Run.' })
@@ -427,11 +442,11 @@ export function Patterns() {
               Custom Editor · {pinLabel(custom)} {custom.name}
             </h2>
             <div className="flex items-center gap-1">
-              <Button type="tertiary" size="small" svgOnly aria-label="Undo" tooltip tooltipKeys={['⌘', 'Z']} disabled={!past.length} onClick={() => { setFuture([s.bits, ...future]); s.set({ bits: past[past.length - 1] }); setPast(past.slice(0, -1)) }}>
-                <ChevronLeft size={16} />
+              <Button type="tertiary" size="small" svgOnly aria-label="Undo" tooltip tooltipKeys={['⌘', 'Z']} disabled={!past.length} onClick={undo}>
+                <Undo2 size={16} />
               </Button>
-              <Button type="tertiary" size="small" svgOnly aria-label="Redo" tooltip disabled={!future.length} onClick={() => { setPast([...past, s.bits]); s.set({ bits: future[0] }); setFuture(future.slice(1)) }}>
-                <ChevronRight size={16} />
+              <Button type="tertiary" size="small" svgOnly aria-label="Redo" tooltip tooltipKeys={['⇧', '⌘', 'Z']} disabled={!future.length} onClick={redo}>
+                <Redo2 size={16} />
               </Button>
               <div className="w-24">
                 <Input

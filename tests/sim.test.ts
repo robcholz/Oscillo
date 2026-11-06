@@ -28,6 +28,8 @@ describe('formatting', () => {
   })
   it('labels axis ends with units and inner ticks without', () => {
     expect(axisTicks([-1e-3, -6e-4, -2e-4, 2e-4, 6e-4, 1e-3], 's')).toEqual(['-1 ms', '-0.6', '-0.2', '0.2', '0.6', '1 ms'])
+    expect(axisTicks([20e-3, 10e-3, 0], 'A')).toEqual(['20 mA', '10', '0 A'])
+    expect(axisTicks([-1, 0, 1], 'V')).toEqual(['-1 V', '0 V', '1 V'])
   })
   it('parses SI suffixes', () => {
     expect(parseSi('200u')).toBeCloseTo(200e-6)
@@ -85,5 +87,19 @@ describe('spectrum metrics', () => {
   it('gives sensible SNR and ENOB', () => {
     expect(m.snr).toBeGreaterThan(60)
     expect(m.enob).toBeGreaterThan(8)
+  })
+})
+
+import { toastType } from '../src/renderer/src/store'
+describe('toast colours', () => {
+  it('matches the design', () => {
+    expect(toastType('Could not save the workspace')).toBe('error')
+    expect(toastType('MCP server could not start')).toBe('error')
+    expect(toastType('Capture failed')).toBe('error')
+    expect(toastType('Device disconnected')).toBe('warning')
+    expect(toastType('All 16 pins are in use')).toBe('warning')
+    expect(toastType('Programmed blinky.bit')).toBe('success')
+    expect(toastType('Workspace saved')).toBe('success')
+    expect(toastType('Cursors removed')).toBeUndefined()
   })
 })

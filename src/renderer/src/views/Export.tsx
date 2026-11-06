@@ -11,7 +11,7 @@ import { compareWithFile, extractWorkspace, openWorkspace, saveProject, saveWork
 import { useExport, type E } from './export-store'
 import { useScope } from './scope-store'
 
-const W = 'w-[200px]'
+const W = 'w-[280px] max-[1100px]:w-[240px]'
 
 export function Export() {
   const e = useExport()
@@ -63,7 +63,7 @@ export function Export() {
       : `Next file: ${expand(e.pattern, 1, e.instrument)}`
 
   return (
-    <ScrollPage className="flex max-w-[1120px] flex-col gap-4" bar={<PageBar title="Export and Logging" />}>
+    <ScrollPage className="flex flex-col gap-4" bar={<PageBar title="Export and Logging" />}>
       <Fieldset
         title="Export Data"
         subtitle={`${e.dataInstrument} · last capture`}
@@ -153,12 +153,12 @@ export function Export() {
           {sel('save', 'Save', ['Every Capture', 'Every Triggered Capture', 'Manual'])}
         </OptionRow>
         <OptionRow label="File Name Pattern" description="Tokens: {index:N}, {date:format}, {instrument}.">
-          <div className="w-[320px]">
+          <div className="w-[440px] max-[1100px]:w-[320px]">
             <Input size="small" aria-label="File Name Pattern" className="font-mono" value={e.pattern} onChange={(x) => e.set({ pattern: x.target.value })} />
           </div>
         </OptionRow>
         <OptionRow label="Folder" description="Where log files are saved.">
-          <div className="flex w-[320px] gap-2">
+          <div className="flex w-[440px] gap-2 max-[1100px]:w-[320px]">
             <div className="min-w-0 flex-1">
               <Input size="small" aria-label="Folder" value={e.folder} onChange={(x) => e.set({ folder: x.target.value })} />
             </div>

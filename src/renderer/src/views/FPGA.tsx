@@ -57,7 +57,7 @@ const PHASE: Record<FpgaProgress['phase'], string> = {
   Done: 'Programmed'
 }
 const kb = (n: number) => (n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(2)} MB` : `${(n / 1024).toFixed(1)} KB`)
-const W = 'w-[220px]'
+const W = 'w-[280px] max-[1100px]:w-[240px]'
 
 export function FPGA() {
   const s = useFpga()
@@ -162,7 +162,7 @@ export function FPGA() {
 
   return (
     <ScrollPage
-      className="flex max-w-[1120px] flex-col gap-4"
+      className="flex flex-col gap-4"
       bar={
         <>
           <PageBar title="FPGA Utility">
@@ -235,7 +235,7 @@ export function FPGA() {
         footer={fileError || (info ? [info.design, info.part, info.date, kb(info.bytes)].filter(Boolean).join(' · ') : 'No file selected')}
       >
         <OptionRow label="File" description="The configuration to load into the FPGA.">
-          <div className="flex w-[360px] gap-2">
+          <div className="flex w-[440px] gap-2 max-[1100px]:w-[320px]">
             <div className="min-w-0 flex-1">
               <Input
                 size="small"

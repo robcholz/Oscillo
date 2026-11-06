@@ -113,7 +113,7 @@ export function Calibration() {
 
   return (
     <ScrollPage
-      className="flex max-w-[1120px] flex-col gap-4"
+      className="flex flex-col gap-4"
       bar={
         <PageBar title="Calibration" status={<StatusDot state={all ? 'READY' : st.done ? 'BUILDING' : active ? 'READY' : 'QUEUED'} label={all ? 'Ready to Save' : st.done ? `Step ${st.done + 1} of ${N}` : active ? 'Corrected' : 'Factory'} />} sub={dev?.name ?? 'No Device'}>
           <Button

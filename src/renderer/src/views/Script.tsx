@@ -29,7 +29,7 @@ function Folder({ name, files, cur, onOpen, initial = true }: { name: string; fi
                   className={cn('flex h-8 w-full cursor-pointer items-center gap-2 rounded-small pl-7 pr-2 text-left text-sm', f === cur ? 'bg-gray-alpha-200 text-gray-1000' : 'text-gray-900 hover:bg-gray-alpha-100 hover:text-gray-1000')}
                 >
                   <Icon size={16} className="flex-none" />
-                  <span className="truncate font-mono text-[13px]">{f}</span>
+                  <span className="truncate text-[13px]">{f}</span>
                 </button>
               </li>
             )
@@ -134,7 +134,7 @@ export function Script() {
       </PanelSection>
       <PanelSection title="Run from Terminal" className="shadow-none">
         <p className="m-0 text-[13px] leading-[18px] text-gray-900">Runs the open script without the window, with the options above. Scripts are saved to Documents/Oscillo/Scripts.</p>
-        <Snippet text={`${exe} --script ${s.cur}${s.sandbox === 'Allow Network' ? ' --allow-net' : s.sandbox === 'Allow Files' ? ' --allow-files' : ''}${s.timeout === '30 s' ? '' : s.timeout === 'None' ? ' --timeout 0' : ' --timeout 300'}`} />
+        <Snippet className="[&_code]:whitespace-pre-wrap [&_code]:[overflow-wrap:anywhere]" text={`${exe} --script ${s.cur}${s.sandbox === 'Allow Network' ? ' --allow-net' : s.sandbox === 'Allow Files' ? ' --allow-files' : ''}${s.timeout === '30 s' ? '' : s.timeout === 'None' ? ' --timeout 0' : ' --timeout 300'}`} />
       </PanelSection>
     </>
   )

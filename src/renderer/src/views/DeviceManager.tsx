@@ -34,7 +34,7 @@ export function DeviceManager() {
 
   return (
     <ScrollPage
-      className="flex max-w-[1040px] flex-col gap-6 p-6!"
+      className="flex flex-col gap-4"
       bar={
         <PageBar title="Device Manager">
           <div className="w-[136px]">

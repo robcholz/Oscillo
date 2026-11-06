@@ -35,11 +35,14 @@ export function App() {
   }, [animations])
   useEffect(() => {
     // Sizes are designed at 13 px, so a larger text size scales the whole window like a zoom.
-    document.documentElement.style.zoom = String(parseInt(fontSize) / 13)
+    // Viewport units are not zoomed, so the shell divides 100vh by the same factor (see below).
+    const z = parseInt(fontSize) / 13
+    document.documentElement.style.zoom = String(z)
+    document.documentElement.style.setProperty('--app-zoom', String(z))
   }, [fontSize])
   return (
     <TooltipProvider>
-      <div className="flex h-screen min-h-[600px] min-w-[960px] flex-col overflow-hidden bg-background-100 text-sm text-gray-1000">
+      <div className="flex h-[calc(100vh/var(--app-zoom,1))] min-h-[calc(600px/var(--app-zoom,1))] min-w-[calc(960px/var(--app-zoom,1))] flex-col overflow-hidden bg-background-100 text-sm text-gray-1000">
         <Header />
         <div className="flex min-h-0 flex-1">
           <Sidebar />

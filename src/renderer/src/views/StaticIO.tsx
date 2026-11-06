@@ -112,7 +112,7 @@ export function StaticIO() {
 
   return (
     <ScrollPage
-      className="flex max-w-[1120px] flex-col gap-4"
+      className="flex flex-col gap-4"
       bar={
         <PageBar title="Static I/O" status={<StatusDot state={live ? 'READY' : 'QUEUED'} label={live ? 'Live' : 'Stopped'} />}>
           <Button

@@ -42,8 +42,8 @@ export function Header() {
   }
 
   return (
-    <header className="drag flex h-14 flex-none items-center justify-between gap-2 bg-background-100 py-2 pr-3 shadow-[inset_0_-1px_0_var(--gray-alpha-400)]">
-      <div className="flex min-w-0 flex-1 items-center gap-2">
+    <header className="drag flex h-14 flex-none items-center justify-between gap-3 bg-background-100 py-2 pr-3 shadow-[inset_0_-1px_0_var(--gray-alpha-400)]">
+      <div className="flex items-center gap-2">
         {/* macOS draws the traffic lights here. */}
         <div className="h-full w-20 flex-none" aria-hidden="true" />
         <Button
@@ -116,19 +116,20 @@ export function Header() {
         >
           <span className="text-[13px] leading-4 text-gray-900">Workspace: {s.workspace}</span>
         </MenuButton>
+      </div>
+      <div className="flex items-center justify-end gap-2">
+        {/* Search sits with the status and actions, next to MCP. Below 1220px it becomes an icon button. */}
         <button
           type="button"
           aria-haspopup="dialog"
           aria-label="Search instruments and commands"
           onClick={() => s.setSearchOpen(true)}
-          className="flex h-8 w-60 cursor-pointer items-center gap-2 rounded-small bg-transparent pl-2.5 pr-1.5 text-left text-sm text-gray-900 shadow-[0_0_0_1px_var(--gray-alpha-400)] hover:shadow-[0_0_0_1px_var(--gray-alpha-500)] max-[1360px]:w-44 max-[1220px]:w-8 max-[1220px]:justify-center max-[1220px]:px-0 kbd-focus:shadow-focus-ring"
+          className="flex h-8 w-60 cursor-pointer items-center gap-2 rounded-small bg-transparent pl-2.5 pr-1.5 text-left text-sm text-gray-900 shadow-[0_0_0_1px_var(--gray-alpha-400)] hover:shadow-[0_0_0_1px_var(--gray-alpha-500)] kbd-focus:shadow-focus-ring max-[1220px]:w-8 max-[1220px]:justify-center max-[1220px]:px-0"
         >
           <Search size={16} className="flex-none" />
           <span className="flex-1 max-[1220px]:hidden">Search…</span>
-          <Kbd small className="max-[1220px]:hidden">⌘K</Kbd>
+          <Kbd small keys={['⌘', 'K']} className="max-[1220px]:hidden" />
         </button>
-      </div>
-      <div className="flex flex-none items-center gap-2">
         <Tooltip
           position="bottom"
           text={mcp.pending ? 'An agent request is waiting for your approval' : mcp.on ? `MCP server running, ${mcp.clients} ${mcp.clients === 1 ? 'client' : 'clients'} connected` : 'MCP server stopped'}

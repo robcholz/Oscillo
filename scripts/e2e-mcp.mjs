@@ -1,49 +1,48 @@
-// Starts the built app, talks to its MCP server over HTTP and through the stdio bridge. Debug aid.
+// Starts the built app and talks to its MCP server with the official SDK client, over HTTP and
+// through the stdio bridge, then checks the bridge's error when the app is closed. Debug aid.
 import { createRequire } from 'node:module'
-import { execSync, spawn } from 'node:child_process'
+import { execSync } from 'node:child_process'
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-const require = createRequire(execSync('npm root -g').toString().trim() + '/')
-const { _electron: electron } = require('playwright')
-const localRequire = createRequire(import.meta.url)
+const groot = createRequire(execSync('npm root -g').toString().trim() + '/')
+const { _electron: electron } = groot('playwright')
+const local = createRequire(import.meta.url)
+const { Client } = local('@modelcontextprotocol/sdk/client/index.js')
+const { StreamableHTTPClientTransport } = local('@modelcontextprotocol/sdk/client/streamableHttp.js')
+const { StdioClientTransport } = local('@modelcontextprotocol/sdk/client/stdio.js')
 const profile = mkdtempSync(join(tmpdir(), 'oscillo-mcp-'))
-const app = await electron.launch({ executablePath: localRequire('electron'), args: ['.', '--no-sandbox', `--user-data-dir=${profile}`], env: { ...process.env, HOME: profile } })
+const electronBin = local('electron')
+const app = await electron.launch({ executablePath: electronBin, args: ['.', '--no-sandbox', `--user-data-dir=${profile}`], env: { ...process.env, HOME: profile } })
 const win = await app.firstWindow()
-await win.waitForLoadState('domcontentloaded')
-await win.waitForTimeout(2500)
-const cfg = JSON.parse(readFileSync(join(profile, 'mcp.json'), 'utf8'))
-let sid
-const rpc = async (method, params = {}, id = Math.random()) => {
-  const r = await fetch(`http://127.0.0.1:${cfg.port}/mcp`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.token}`, ...(sid ? { 'Mcp-Session-Id': sid } : {}) }, body: JSON.stringify({ jsonrpc: '2.0', id, method, params }) })
-  sid = r.headers.get('mcp-session-id') ?? sid
-  return r.json()
-}
-const short = (x) => JSON.stringify(x).slice(0, 400)
-console.log('init', short(await rpc('initialize', { protocolVersion: '2025-06-18', clientInfo: { name: 'claude-ai' }, capabilities: {} })))
-console.log('tools', (await rpc('tools/list')).result.tools.map((t) => t.name).join(' '))
-console.log('capture', short(await rpc('tools/call', { name: 'scope_capture', arguments: {} })))
-console.log('measure', short(await rpc('tools/call', { name: 'scope_measure', arguments: { channel: 1, names: ['Frequency', 'PeakToPeak'] } })))
-// An output needs approval: approve it on the MCP page.
-await win.evaluate(() => { const raw = JSON.parse(localStorage.getItem('oscillo') ?? '{"state":{}}'); raw.state.page = 'mcp'; localStorage.setItem('oscillo', JSON.stringify(raw)) })
-await win.reload()
-await win.waitForTimeout(1500)
-const call = rpc('tools/call', { name: 'supplies_set', arguments: { rail: 'positive', voltage: 3.3, enable: true } })
-await win.waitForTimeout(800)
-const sub = await win.evaluate(() => document.body.innerText.match(/Claude Desktop wants[^\n]*/)?.[0])
-console.log('card:', sub)
-await win.getByRole('button', { name: 'Approve Output' }).click()
-console.log('supplies', short(await call))
-console.log('script', short(await rpc('tools/call', { name: 'script_run', arguments: { code: 'import { supplies } from "oscillo";\nconsole.log(supplies.positive.read().voltage.toFixed(2));' } })))
-console.log('audit:', await win.evaluate(() => document.querySelector('[aria-label="MCP audit log"]')?.innerText.slice(0, 300) ?? document.body.innerText.slice(0, 50)))
+await win.waitForTimeout(3500)
+const ud = await app.evaluate(({ app }) => app.getPath('userData'))
+const cfg = JSON.parse(readFileSync(join(ud, 'mcp.json'), 'utf8'))
+console.log('cfg port', cfg.port, 'token?', !!cfg.token)
+// HTTP
+const c = new Client({ name: 'claude-code', version: '1.0.0' })
+await c.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${cfg.port}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${cfg.token}` } } }))
+console.log('server', c.getServerVersion(), 'instructions?', !!c.getInstructions())
+const tools = await c.listTools(); console.log('tools', tools.tools.length, tools.tools.slice(0, 3).map((t) => t.name))
+const r = await c.callTool({ name: 'device_info', arguments: {} }); console.log('device_info', r.isError ?? false, r.content[0].text.slice(0, 80).replace(/\n/g, ' '))
+const cap = await c.callTool({ name: 'scope_capture', arguments: { samples: 1024 } }); console.log('scope_capture', cap.isError ?? false, cap.content[0].text.slice(0, 80).replace(/\n/g, ' '))
+const res = await c.listResources(); console.log('resources', res.resources.map((x) => x.uri).join(' '))
+const rd = await c.readResource({ uri: 'oscillo://device' }); console.log('read', rd.contents[0].text.slice(0, 60).replace(/\n/g, ' '))
+try { await c.readResource({ uri: 'oscillo://nope' }) } catch (e) { console.log('bad resource ->', e.message) }
+const sess = await win.evaluate(() => document.body.innerText.includes('Claude Code'))
+await c.close()
+// bad token
+const bad = new Client({ name: 'x', version: '1' })
+try { await bad.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${cfg.port}/mcp`), { requestInit: { headers: { Authorization: 'Bearer nope' } } })); console.log('bad token connected?!') } catch (e) { console.log('bad token ->', e.message.slice(0, 90)) }
 // stdio bridge
-const child = spawn(localRequire('electron'), ['.', '--no-sandbox', `--user-data-dir=${profile}`, '--mcp-stdio'], { env: { ...process.env, HOME: profile } })
-let out = ''
-child.stdout.on('data', (d) => (out += d))
-child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', clientInfo: { name: 'codex' }, capabilities: {} } }) + '\n')
-child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n')
-child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'device_info', arguments: {} } }) + '\n')
-await new Promise((r) => setTimeout(r, 4000))
-console.log('stdio:', out.slice(0, 600))
-child.kill()
+const s = new Client({ name: 'codex', version: '1.0.0' })
+await s.connect(new StdioClientTransport({ command: electronBin, args: ['.', '--no-sandbox', '--mcp-stdio', `--user-data-dir=${profile}`], cwd: process.cwd(), env: { ...process.env, HOME: profile }, stderr: 'ignore' }))
+const t2 = await s.listTools(); console.log('stdio tools', t2.tools.length)
+const r2 = await s.callTool({ name: 'device_list', arguments: {} }); console.log('stdio device_list', r2.content[0].text.slice(0, 60).replace(/\n/g, ' '))
+await s.close()
 await app.close()
+// stdio with app closed
+const s3 = new Client({ name: 'codex', version: '1.0.0' })
+try { await s3.connect(new StdioClientTransport({ command: electronBin, args: ['.', '--no-sandbox', '--mcp-stdio', `--user-data-dir=${profile}`], cwd: process.cwd(), env: { ...process.env, HOME: profile }, stderr: 'ignore' })); console.log('connected without app?!') } catch (e) { console.log('app closed ->', e.message.slice(0, 120)) }
+await s3.close().catch(() => {})
+process.exit(0)

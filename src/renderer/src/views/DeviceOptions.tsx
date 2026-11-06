@@ -76,7 +76,7 @@ follow(
   'device options'
 )
 
-const W = 'w-[180px]'
+const W = 'w-[280px] max-[1100px]:w-[240px]'
 
 export function DeviceOptions() {
   const o = useOpts()
@@ -97,7 +97,7 @@ export function DeviceOptions() {
 
   return (
     <ScrollPage
-      className="flex max-w-[1120px] flex-col gap-4"
+      className="flex flex-col gap-4"
       bar={
         <PageBar title="Device Options" sub={dev?.name ?? 'No device connected'}>
           <Button size="small" type="tertiary" prefix={<RefreshCw size={16} />} onClick={() => { o.set(DEFAULTS); app.toast('Defaults restored') }}>

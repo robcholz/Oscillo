@@ -38,13 +38,22 @@ interface Actions {
   setPanel: (id: string, p: Partial<PanelPref>) => void
   setSearchOpen: (o: boolean) => void
   setConfig: (c: string) => void
-  toast: (title: string, opts?: { detail?: string; action?: ToastItem['action'] }) => void
+  toast: (title: string, opts?: { detail?: string; action?: ToastItem['action']; type?: ToastItem['type'] }) => void
   dismissToast: (id: number) => void
 }
 
 export type State = Persisted & Ephemeral & Actions
 
 let toastId = 0
+
+/** The colour a toast gets when the caller does not say: failures are errors, lost or refused
+ * things are warnings, finished files and programming are successes, the rest stay plain. */
+export function toastType(title: string): ToastItem['type'] {
+  if (/\b(could not|cannot|can't|failed)\b|^no bitstream|^dmm stopped/i.test(title)) return 'error'
+  if (/\b(disconnected|unplugged|not available|lost|denied|in use|overlap|already running|is the limit|must be|needs the desktop app|problems?)\b|^(no|nothing)\b|^wait for/i.test(title)) return 'warning'
+  if (/^(exported|saved|imported|programmed|paired|extracted|workspace (saved|extracted)|calibration saved)\b/i.test(title)) return 'success'
+  return undefined
+}
 
 export const useStore = create<State>()(
   persist(
@@ -70,8 +79,10 @@ export const useStore = create<State>()(
       setConfig: (config) => set({ config }),
       toast: (title, opts) => {
         const id = ++toastId
-        set({ toasts: [...get().toasts.slice(-2), { id, title, ...opts }] })
-        setTimeout(() => get().dismissToast(id), 4000)
+        const type = opts?.type ?? toastType(title)
+        set({ toasts: [...get().toasts.slice(-2), { id, title, ...opts, type }] })
+        // Problems stay up longer, so there is time to read the fix.
+        setTimeout(() => get().dismissToast(id), type === 'error' || type === 'warning' ? 8000 : 4000)
       },
       dismissToast: (id) => set({ toasts: get().toasts.filter((t) => t.id !== id) })
     }),

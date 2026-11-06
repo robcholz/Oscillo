@@ -84,7 +84,7 @@ export function CommandMenu({ open, setOpen, items, placeholder = 'Search comman
                         {i.icon && <span className="flex flex-none text-gray-900">{i.icon}</span>}
                         <span className="flex-1">{i.label}</span>
                         {i.hint && <span className="font-mono text-xs text-gray-700">{i.hint}</span>}
-                        {i.keys && <Kbd small>{i.keys.join('')}</Kbd>}
+                        {i.keys && <Kbd small keys={i.keys} />}
                       </Command.Item>
                     ))}
                 </Command.Group>
@@ -97,7 +97,10 @@ export function CommandMenu({ open, setOpen, items, placeholder = 'Search comman
               <Kbd small>↓</Kbd> Navigate
             </span>
             <span className="flex items-center gap-1.5">
-              <Kbd small>↵</Kbd> Run
+              <Kbd small>↵</Kbd> Open
+            </span>
+            <span className="flex items-center gap-1.5">
+              <Kbd small>Esc</Kbd> Close
             </span>
           </div>
         </Dialog.Content>

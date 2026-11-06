@@ -1,7 +1,7 @@
 // Digital Multimeter (board: DMM). Only on Analog Discovery Pro 5250; other devices see the layout
 // with a banner.
 import { Banner, Button, Description, Material, StatusDot } from '@robcholz/geist'
-import { Hand, Info, Minus, Play, Square } from 'lucide-react'
+import { Pause, Info, Minus, Play, Square } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
@@ -125,10 +125,10 @@ export function DMM() {
       className="flex flex-col gap-4"
       bar={
         <PageBar title="Digital Multimeter" status={<StatusDot state={live ? 'READY' : hold ? 'BUILDING' : 'QUEUED'} label={live ? 'Running' : hold ? 'Held' : 'Stopped'} />} sub="Available on Analog Discovery Pro 5250">
-          <Button size="small" type={hold ? 'secondary' : 'tertiary'} prefix={<Hand size={16} />} aria-pressed={hold} onClick={() => setHold(!hold)} tooltip="Freeze the reading">
-            Hold
+          <Button size="small" type="secondary" prefix={hold ? <Play size={16} /> : <Pause size={16} />} aria-pressed={hold} onClick={() => setHold(!hold)} tooltip={hold ? 'Resume live readings' : 'Freeze the reading'}>
+            {hold ? 'Resume' : 'Hold'}
           </Button>
-          <Button size="small" type={rel !== null ? 'secondary' : 'tertiary'} prefix={<Minus size={16} />} aria-pressed={rel !== null} onClick={toggleRel} tooltip="Subtract the current reading">
+          <Button size="small" type="secondary" prefix={<Minus size={16} />} aria-pressed={rel !== null} onClick={toggleRel} tooltip="Subtract the current reading">
             Relative
           </Button>
           <Button size="small" prefix={d.running && app.running ? <Square size={16} /> : <Play size={16} />} onClick={run} tooltipKeys={['Space']}>
@@ -142,32 +142,29 @@ export function DMM() {
           {dev.name} has no DMM. Connect an Analog Discovery Pro 5250, or the Demo Device to try it.
         </Banner>
       )}
-      <div className="grid grid-cols-[minmax(0,2fr)_minmax(280px,1fr)] gap-4 max-[1100px]:grid-cols-1">
-        <Material className="flex min-w-0 flex-col gap-6 p-6">
-          <div className="flex items-baseline justify-between gap-3">
-            <span className="text-sm text-gray-900">
-              {d.fn}
-              {rel !== null && ' · Relative'}
-            </span>
-            <span className="text-[13px] text-gray-900">Range {d.range}</span>
-          </div>
-          <span className="text-[72px] font-semibold leading-[80px] tabular-nums tracking-[-4.32px]">{fmt(st.last)}</span>
-          <div className="grid grid-cols-4 gap-4 max-[1180px]:grid-cols-2">
-            <Description title="Min" content={<span className="tabular-nums">{st.n ? fmt(st.min) : '—'}</span>} />
-            <Description title="Max" content={<span className="tabular-nums">{st.n ? fmt(st.max) : '—'}</span>} />
-            <Description title="Average" content={<span className="tabular-nums">{st.n ? fmt(st.sum / st.n) : '—'}</span>} />
-            <Description title="Samples" content={<span className="tabular-nums">{st.n.toLocaleString()}</span>} />
-          </div>
-        </Material>
-        <Material className="flex min-w-0 flex-col gap-3 p-6">
-          <LabeledSelect label="Function" value={d.fn} options={FUNCTIONS} onValueChange={(fn) => change({ fn })} />
-          <LabeledSelect label="Range" value={d.range} options={RANGES} onValueChange={(range) => change({ range })} disabled={!['DC Voltage', 'AC Voltage'].includes(d.fn)} />
-          <LabeledSelect label="Resolution" value={d.res} options={RES} onValueChange={(res) => change({ res })} />
-          <LabeledSelect label="Input Impedance" value={d.input} options={INPUTS} onValueChange={(input) => change({ input })} disabled={d.fn !== 'DC Voltage'} />
-          <Button size="small" type="secondary" onClick={() => setSt(empty)}>
+      <Material className="flex min-w-0 flex-col gap-4 p-6">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-sm text-gray-900">
+            {d.fn} · {d.range === 'Auto' ? 'Auto Range' : `Range ${d.range}`}
+            {rel !== null && ' · Relative'}
+          </span>
+          <Button size="small" type="tertiary" disabled={!st.n} onClick={() => setSt(empty)}>
             Reset Statistics
           </Button>
-        </Material>
+        </div>
+        <span className="text-[72px] font-semibold leading-[80px] tabular-nums tracking-[-4.32px]">{fmt(st.last)}</span>
+        <div className="flex flex-wrap gap-x-8 gap-y-3">
+          <Description title="Min" content={<span className="tabular-nums">{st.n ? fmt(st.min) : '—'}</span>} />
+          <Description title="Max" content={<span className="tabular-nums">{st.n ? fmt(st.max) : '—'}</span>} />
+          <Description title="Average" content={<span className="tabular-nums">{st.n ? fmt(st.sum / st.n) : '—'}</span>} />
+          <Description title="Samples" content={<span className="tabular-nums">{st.n.toLocaleString()}</span>} />
+        </div>
+      </Material>
+      <div className="grid grid-cols-4 gap-4 max-[1100px]:grid-cols-2">
+        <LabeledSelect label="Function" value={d.fn} options={FUNCTIONS} onValueChange={(fn) => change({ fn })} />
+        <LabeledSelect label="Range" value={d.range} options={RANGES} onValueChange={(range) => change({ range })} disabled={!['DC Voltage', 'AC Voltage'].includes(d.fn)} />
+        <LabeledSelect label="Resolution" value={d.res} options={RES} onValueChange={(res) => change({ res })} />
+        <LabeledSelect label="Input" value={d.input} options={INPUTS} onValueChange={(input) => change({ input })} disabled={d.fn !== 'DC Voltage'} />
       </div>
     </ScrollPage>
   )

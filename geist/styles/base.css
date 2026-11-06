@@ -68,18 +68,10 @@
   }
 }
 
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-::-webkit-scrollbar-thumb {
-  border: 3px solid transparent;
-  border-radius: 9999px;
-  background: var(--gray-alpha-400) padding-box;
-}
-::-webkit-scrollbar-track,
-::-webkit-scrollbar-corner {
-  background: transparent;
+/* Thin system scrollbars, as on vercel.com. Styling ::-webkit-scrollbar would turn off macOS
+   overlay scrollbars and leave a bar beside every scrolling area. */
+* {
+  scrollbar-width: thin;
 }
 
 @keyframes geist-blink {

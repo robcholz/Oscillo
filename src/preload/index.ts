@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { CAL, type CalApi } from '../shared/calibration'
+import { COMMAND, type AppCommand } from '../shared/commands'
 import { FILES, type FilesApi } from '../shared/files'
 import { FPGA, type FpgaApi, type FpgaProgress } from '../shared/fpga'
 import { HW, type HwApi } from '../shared/hw'
@@ -73,6 +74,12 @@ const fpga: FpgaApi = {
 const api = {
   platform: process.platform,
   setTheme: (theme: ThemePref): void => ipcRenderer.send(IPC.setTheme, theme),
+  /** Menu bar commands and their shortcuts (src/main/menu.ts). */
+  onCommand: (fn: (cmd: AppCommand) => void): (() => void) => {
+    const h = (_e: unknown, c: AppCommand) => fn(c)
+    ipcRenderer.on(COMMAND, h)
+    return () => void ipcRenderer.removeListener(COMMAND, h)
+  },
   hw,
   script,
   mcp,

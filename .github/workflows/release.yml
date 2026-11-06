@@ -1,0 +1,64 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+  # Run by hand to get a dmg from any branch without publishing a release.
+  workflow_dispatch:
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+permissions:
+  contents: write
+jobs:
+  mac:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Check the tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $version"
+            exit 1
+          fi
+      - run: npm ci
+      - run: node scripts/copy-dwf.mjs --check
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      # Unsigned for now; see identity: null in electron-builder.yml.
+      - run: npx electron-builder --mac --publish never
+      - name: Check the app bundle
+        run: |
+          version=$(node -p "require('./package.json').version")
+          app=$(ls -d dist/mac*/Oscillo.app)
+          for key in CFBundleShortVersionString CFBundleVersion; do
+            got=$(/usr/libexec/PlistBuddy -c "Print :$key" "$app/Contents/Info.plist")
+            echo "$key=$got"
+            [ "$got" = "$version" ] || { echo "::error::$key is $got, expected $version"; exit 1; }
+          done
+          # The WaveForms SDK and the app icon ship inside the bundle.
+          test -f "$app/Contents/Frameworks/dwf.framework/dwf" || { echo "::error::dwf.framework is missing from the app"; exit 1; }
+          icon=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIconFile" "$app/Contents/Info.plist")
+          test -f "$app/Contents/Resources/${icon%.icns}.icns" || { echo "::error::App icon $icon is missing"; exit 1; }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Oscillo-mac
+          path: dist/*.dmg
+          if-no-files-found: error
+      # Settings > Check for Updates reads the latest release and links to its dmg.
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.dmg \
+            --title "Oscillo ${GITHUB_REF_NAME#v}" \
+            --generate-notes \
+            --verify-tag

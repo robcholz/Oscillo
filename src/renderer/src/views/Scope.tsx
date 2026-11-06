@@ -1,5 +1,6 @@
 // Oscilloscope (board: Main). Live captures from the simulated front end, a 10-division plot with
 // cursors and a probe, measurements with running statistics, and the channel settings panel.
+import { useCommand } from '../shell/commands'
 import {
   Button, DotsMenu, Entity, FormModal, LegendItem, Material, MenuContent, MenuItem, MenuRoot, MenuSeparator, MenuTrigger, Note, Select,
   Slider, StatusDot, Switch, Table, Tabs, Textarea, Toggle, type FormField
@@ -279,6 +280,8 @@ export function Scope() {
     s.set({ zoom: 1 })
     toast('Auto Set: 1 V/div, 200 µs/div, trigger at 0 V')
   }
+  useCommand('single', single)
+  useCommand('auto-set', autoSet)
   const resetStats = (): void => {
     stats.current = {}
     bump((x) => x + 1)
@@ -371,10 +374,10 @@ export function Scope() {
     <PageBar title="Oscilloscope" status={status}>
       <Switch aria-label="Trigger Mode" value={cfg.triggerMode} onChange={(v) => s.setCfg({ triggerMode: v })} options={['Auto', 'Normal', 'None'] as const} />
       <Select size="small" aria-label="Run Mode" value={s.runMode} onValueChange={(v) => s.set({ runMode: v })} options={['Repeated', 'Scan Screen', 'Scan Shift', 'Record']} className="!w-[148px]" />
-      <Button type="secondary" size="small" prefix={<WandSparkles size={16} />} onClick={autoSet}>
+      <Button type="secondary" size="small" prefix={<WandSparkles size={16} />} onClick={autoSet} tooltip="Fit every channel and the timebase" tooltipKeys={['⇧', '⌘', 'A']} tooltipPosition="bottom">
         Auto Set
       </Button>
-      <Button type="secondary" size="small" prefix={<StepForward size={16} />} onClick={single}>
+      <Button type="secondary" size="small" prefix={<StepForward size={16} />} onClick={single} tooltip="Capture once" tooltipKeys={['⌘', '↵']} tooltipPosition="bottom">
         Single
       </Button>
       <Button size="small" prefix={s.running && app.running ? <Square size={16} /> : <Play size={16} />} onClick={toggleRun} tooltipKeys={['Space']}>

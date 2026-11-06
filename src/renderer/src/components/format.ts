@@ -57,6 +57,8 @@ export function axisTicks(values: number[], unit: string): string[] {
   return values.map((v, i) => {
     const n = v / f
     const txt = Math.abs(n) < 1e-9 ? '0' : dec(n.toFixed(places).replace(/\.0+$/, ''))
-    return i === 0 || i === values.length - 1 ? `${txt} ${p}${unit}` : txt
+    if (i === 0 || i === values.length - 1) return txt === '0' ? `0 ${unit}`.trim() : `${txt} ${p}${unit}`
+    // Zero carries the base unit, like the ends: "0 s", "0 V".
+    return txt === '0' && unit ? `0 ${unit}` : txt
   })
 }

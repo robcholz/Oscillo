@@ -8,6 +8,7 @@ import { usePrefs } from '../prefs'
 import { files } from '../files'
 import { useStore } from '../store'
 import { checkRelease, REPO } from '../updates'
+import { useCommand } from '../shell/commands'
 
 
 const SECTIONS = [
@@ -22,16 +23,21 @@ const SECTIONS = [
   { id: 'reset', label: 'Reset' }
 ] as const
 
-const SHORTCUTS: { a: string; k: string[] }[] = [
-  { a: 'Command Menu', k: ['⌘', 'K'] },
-  { a: 'Run or Stop All', k: ['Space'] },
-  { a: 'Run Script', k: ['⌘', 'R'] },
-  { a: 'Save Workspace', k: ['⌘', 'S'] },
-  { a: 'Open Workspace', k: ['⌘', 'O'] },
-  { a: 'Toggle Sidebar', k: ['⌘', 'B'] },
-  { a: 'Toggle Light and Dark', k: ['⌘', '⇧', 'L'] },
-  { a: 'Open Instrument 1 to 6', k: ['⌘', '1–6'] },
-  { a: 'Settings', k: ['⌘', ','] }
+// macOS order: ⌃ ⌥ ⇧ ⌘, then the key.
+const SHORTCUTS: { a: string; k: string[][] }[] = [
+  { a: 'Command Menu', k: [['⌘', 'K']] },
+  { a: 'Open Scope, Wavegen, Supplies, Logic, Spectrum or Script', k: [['⌘', '1–6']] },
+  { a: 'Open Settings', k: [['⌘', ',']] },
+  { a: 'Run or Stop All', k: [['Space']] },
+  { a: 'Single Capture', k: [['⌘', '↵']] },
+  { a: 'Auto Set', k: [['⇧', '⌘', 'A']] },
+  { a: 'Run Script', k: [['⌘', 'R']] },
+  { a: 'Save Workspace', k: [['⌘', 'S']] },
+  { a: 'Open Workspace', k: [['⌘', 'O']] },
+  { a: 'Toggle Sidebar', k: [['⌘', 'B']] },
+  { a: 'Show or Hide Settings Panel', k: [['⌥', '⌘', '0']] },
+  { a: 'Undo or Redo in Wave and Pattern Editors', k: [['⌘', 'Z'], ['⇧', '⌘', 'Z']] },
+  { a: 'Toggle Light and Dark', k: [['⇧', '⌘', 'L']] }
 ]
 
 const COMMANDS = (exe: string) => [
@@ -69,6 +75,15 @@ export function Settings() {
   const [about, setAbout] = useState(false)
   const [feedback, setFeedback] = useState(false)
   const [confirmReset, setConfirmReset] = useState(false)
+  // Menu bar items that land here (src/main/menu.ts).
+  const jump = (id: string): void => document.getElementById(`settings-${id}`)?.scrollIntoView({ block: 'start' })
+  useCommand('about', () => setAbout(true))
+  useCommand('feedback', () => setFeedback(true))
+  useCommand('shortcuts', () => jump('shortcuts'))
+  useCommand('check-updates', () => {
+    jump('updates')
+    void checkUpdates()
+  })
 
   // The nav follows the section nearest the top of the scroll area.
   useEffect(() => {
@@ -199,9 +214,9 @@ export function Settings() {
               {SHORTCUTS.map((s) => (
                 <div key={s.a} className="flex h-11 items-center justify-between gap-4 [&+&]:shadow-[inset_0_1px_0_var(--gray-alpha-200)]">
                   <span className="text-sm">{s.a}</span>
-                  <span className="flex gap-1" aria-label={s.k.join(' ')}>
-                    {s.k.map((k) => (
-                      <Kbd key={k}>{k}</Kbd>
+                  <span className="flex gap-2" aria-label={s.k.map((c) => c.join('')).join(' or ')}>
+                    {s.k.map((c) => (
+                      <Kbd key={c.join('')} keys={c} />
                     ))}
                   </span>
                 </div>

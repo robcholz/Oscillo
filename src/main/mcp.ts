@@ -2,10 +2,18 @@
 // Streamable HTTP on 127.0.0.1 (JSON responses, bearer token); stdio clients run the app with
 // --mcp-stdio, which relays to this server (see stdioBridge). Outputs follow the permission set for
 // each client, asking in the app when approval is needed, and every call goes to the audit log.
+import { Server as McpServer } from '@modelcontextprotocol/sdk/server/index.js'
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import {
+  CallToolRequestSchema, ErrorCode, isInitializeRequest, isJSONRPCRequest, ListResourcesRequestSchema, ListToolsRequestSchema,
+  ReadResourceRequestSchema, type JSONRPCMessage, type Tool as ToolInfo
+} from '@modelcontextprotocol/sdk/types.js'
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, writeFileSync, readFileSync } from 'node:fs'
-import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { join } from 'node:path'
 import { analyze, metrics } from '../renderer/src/sim/spectrum'
 import { MCP, type AuditRow, type ClientId, type McpEvent, type McpRequest, type McpSettings, type McpStatus, type Perm } from '../shared/mcp'
@@ -15,8 +23,8 @@ import { createApi } from './api'
 import type { Hardware } from './hardware'
 import type { ScriptRunner } from './script'
 
-const PROTOCOLS = ['2025-06-18', '2025-03-26', '2024-11-05']
 type Json = Record<string, unknown>
+type ToolInput = ToolInfo['inputSchema']
 type Content = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
 
 interface Session {
@@ -26,6 +34,7 @@ interface Session {
   since: number
   last: number
   allowed: Set<string>
+  close: () => void
 }
 
 interface Tool {
@@ -62,6 +71,7 @@ export function registerMcp(hw: Hardware, runScript: ScriptRunner): void {
   let server: Server | null = null
   let listening = { port: 0, error: null as string | null }
   const sessions = new Map<string, Session>()
+  const transports = new Map<string, StreamableHTTPServerTransport>()
   const pending = new Map<string, (ok: boolean, session: boolean) => void>()
   const dataDir = join(app.getPath('documents'), 'Oscillo')
   const send = (e: McpEvent) => BrowserWindow.getAllWindows().forEach((w) => w.webContents.send(MCP.event, e))
@@ -513,85 +523,86 @@ export function registerMcp(hw: Hardware, runScript: ScriptRunner): void {
     }
   }
 
-  async function handle(msg: Json, session: Session | null, setSession: (s: Session) => void): Promise<Json | null> {
-    const id = msg.id as string | number | undefined
-    const method = msg.method as string
-    const params = (msg.params ?? {}) as Json
-    const ok = (result: unknown) => ({ jsonrpc: '2.0', id, result })
-    const fail = (code: number, message: string) => ({ jsonrpc: '2.0', id, error: { code, message } })
-    if (id === undefined) return null // notification
-    if (method === 'initialize') {
-      const info = (params.clientInfo ?? {}) as { name?: string }
-      const clientId = clientIdOf(info.name ?? '')
-      const st = settings!
-      if (clientId && !st.clients[clientId]) return fail(-32001, 'This client is disconnected in Oscillo. Allow it to reconnect on the MCP Server page.')
-      const s: Session = { id: randomUUID(), client: clientId ? { desktop: 'Claude Desktop', code: 'Claude Code', codex: 'Codex', chatgpt: 'ChatGPT' }[clientId] : info.name || 'MCP client', clientId, since: Date.now(), last: Date.now(), allowed: new Set() }
-      sessions.set(s.id, s)
-      setSession(s)
-      pushStatus()
-      const v = String(params.protocolVersion ?? '')
-      return ok({
-        protocolVersion: PROTOCOLS.includes(v) ? v : PROTOCOLS[0],
-        capabilities: { tools: {}, resources: {} },
-        serverInfo: { name: 'oscillo', title: 'Oscillo', version: app.getVersion() },
-        instructions: 'Oscillo controls a Digilent test instrument (oscilloscope, waveform generator, supplies, logic analyzer and more). Capture with scope_capture before measuring. Outputs may need the user to approve them in Oscillo.'
-      })
+  const INSTRUCTIONS =
+    'Oscillo controls a Digilent test instrument (oscilloscope, waveform generator, supplies, logic analyzer and more). Capture with scope_capture before measuring. Outputs may need the user to approve them in Oscillo.'
+
+  /** One MCP session: the SDK's protocol server on a Streamable HTTP transport. */
+  function openSession(clientId: ClientId | null, clientName: string): StreamableHTTPServerTransport {
+    const mcp = new McpServer({ name: 'oscillo', title: 'Oscillo', version: app.getVersion() }, { capabilities: { tools: {}, resources: {} }, instructions: INSTRUCTIONS })
+    let session: Session | null = null
+    const live = (): Session => {
+      if (!session) throw Object.assign(new Error('Send initialize first'), { code: ErrorCode.InvalidRequest })
+      session.last = Date.now()
+      return session
     }
-    if (!session) return fail(-32600, 'Send initialize first')
-    session.last = Date.now()
-    if (method === 'ping') return ok({})
-    if (method === 'tools/list') return ok({ tools: tools.filter((t) => settings!.tools[t.group]).map((t) => ({ name: t.name, description: t.description, inputSchema: t.input, annotations: { readOnlyHint: !t.output } })) })
-    if (method === 'tools/call') return ok(await callTool(session, String(params.name), (params.arguments ?? {}) as Json))
-    if (method === 'resources/list') return ok({ resources: RESOURCES })
-    if (method === 'resources/read') {
+    mcp.setRequestHandler(ListToolsRequestSchema, () => {
+      live()
+      return { tools: tools.filter((t) => settings!.tools[t.group]).map((t) => ({ name: t.name, description: t.description, inputSchema: t.input as ToolInput, annotations: { readOnlyHint: !t.output } })) }
+    })
+    mcp.setRequestHandler(CallToolRequestSchema, (r) => callTool(live(), r.params.name, (r.params.arguments ?? {}) as Json))
+    mcp.setRequestHandler(ListResourcesRequestSchema, () => (live(), { resources: RESOURCES }))
+    mcp.setRequestHandler(ReadResourceRequestSchema, async (r) => {
+      live()
+      const uri = r.params.uri
       try {
-        const uri = String(params.uri)
-        return ok({ contents: [{ uri, mimeType: RESOURCES.find((r) => r.uri === uri)?.mimeType, text: await readResource(uri) }] })
+        return { contents: [{ uri, mimeType: RESOURCES.find((x) => x.uri === uri)?.mimeType, text: await readResource(uri) }] }
       } catch (e) {
-        return fail(-32002, (e as Error).message)
+        // A plain error with a code, so the message is not prefixed twice.
+        throw Object.assign(new Error((e as Error).message), { code: -32002 })
       }
+    })
+    const transport: StreamableHTTPServerTransport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: () => randomUUID(),
+      enableJsonResponse: true,
+      onsessioninitialized: (id) => {
+        session = { id, client: clientName, clientId, since: Date.now(), last: Date.now(), allowed: new Set(), close: () => void transport.close() }
+        sessions.set(id, session)
+        pushStatus()
+      }
+    })
+    transport.onclose = () => {
+      if (session && sessions.get(session.id) === session) sessions.delete(session.id)
+      if (session) transports.delete(session.id)
+      pushStatus()
     }
-    return fail(-32601, `Method not found: ${method}`)
+    void mcp.connect(transport)
+    return transport
   }
 
+  const NAMES: Record<ClientId, string> = { desktop: 'Claude Desktop', code: 'Claude Code', codex: 'Codex', chatgpt: 'ChatGPT' }
+  const rpcError = (code: number, message: string) => ({ jsonrpc: '2.0', id: null, error: { code, message } })
+
   async function onRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const reply = (code: number, body?: unknown, headers: Record<string, string> = {}) => {
-      res.writeHead(code, { 'Content-Type': 'application/json', ...headers })
-      res.end(body === undefined ? undefined : JSON.stringify(body))
+    const reply = (code: number, body: unknown) => {
+      res.writeHead(code, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(body))
     }
     if (!req.url?.startsWith('/mcp')) return reply(404, { error: 'Not found' })
-    if (req.headers.authorization !== `Bearer ${settings?.token}`) return reply(401, { error: 'Missing or wrong token. Copy it from the MCP Server page in Oscillo.' })
+    if (req.headers.authorization !== `Bearer ${settings?.token}`) return reply(401, rpcError(-32001, 'Missing or wrong token. Copy it from the MCP Server page in Oscillo.'))
     // Only local pages may call; browsers send Origin.
-    if (req.headers.origin && !/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(req.headers.origin)) return reply(403, { error: 'Origin not allowed' })
+    if (req.headers.origin && !/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(req.headers.origin)) return reply(403, rpcError(-32001, 'Origin not allowed'))
     const sid = req.headers['mcp-session-id'] as string | undefined
-    let session = sid ? (sessions.get(sid) ?? null) : null
-    if (req.method === 'DELETE') {
-      if (sid) sessions.delete(sid)
-      pushStatus()
-      return reply(200, {})
+    const session = sid ? sessions.get(sid) : undefined
+    if (session?.clientId && !settings?.clients[session.clientId]) return reply(403, rpcError(-32001, 'This client was disconnected in Oscillo.'))
+    let body: unknown
+    if (req.method === 'POST') {
+      let raw = ''
+      for await (const chunk of req) raw += chunk
+      try {
+        body = JSON.parse(raw)
+      } catch {
+        return reply(400, rpcError(-32700, 'Parse error'))
+      }
     }
-    if (req.method !== 'POST') return reply(405, { error: 'Use POST' }, { Allow: 'POST, DELETE' })
-    if (sid && !session) return reply(404, { error: 'Session expired. Initialize again.' })
-    if (session?.clientId && !settings?.clients[session.clientId]) return reply(403, { error: 'This client was disconnected in Oscillo.' })
-    let body = ''
-    for await (const chunk of req) body += chunk
-    let msg: unknown
-    try {
-      msg = JSON.parse(body)
-    } catch {
-      return reply(400, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } })
-    }
-    let newSession: Session | null = null
-    const setSession = (s: Session) => (newSession = session = s)
-    const list = Array.isArray(msg) ? msg : [msg]
-    const out: Json[] = []
-    for (const m of list) {
-      const r = await handle(m as Json, session, setSession)
-      if (r) out.push(r)
-    }
-    const headers: Record<string, string> = newSession ? { 'Mcp-Session-Id': (newSession as Session).id } : {}
-    if (!out.length) return reply(202, undefined, headers)
-    reply(200, Array.isArray(msg) ? out : out[0], headers)
+    if (session) return (transports.get(session.id) as StreamableHTTPServerTransport).handleRequest(req, res, body)
+    if (sid) return reply(404, rpcError(-32001, 'Session expired. Initialize again.'))
+    if (req.method !== 'POST' || !isInitializeRequest(body)) return reply(400, rpcError(-32600, 'Send initialize first'))
+    const name = body.params.clientInfo.name ?? ''
+    const clientId = clientIdOf(name)
+    if (clientId && !settings!.clients[clientId]) return reply(403, rpcError(-32001, 'This client is disconnected in Oscillo. Allow it to reconnect on the MCP Server page.'))
+    const transport = openSession(clientId, clientId ? NAMES[clientId] : name || 'MCP client')
+    await transport.handleRequest(req, res, body)
+    if (transport.sessionId) transports.set(transport.sessionId, transport)
   }
 
   function restart(): void {
@@ -601,7 +612,9 @@ export function registerMcp(hw: Hardware, runScript: ScriptRunner): void {
     server?.close()
     server = null
     listening = { port: 0, error: null }
+    for (const x of sessions.values()) x.close()
     sessions.clear()
+    transports.clear()
     if (!want) return pushStatus()
     const s = createServer((req, res) => void onRequest(req, res).catch((e) => (res.writeHead(500), res.end(String(e)))))
     s.on('error', (e: NodeJS.ErrnoException) => {
@@ -630,7 +643,7 @@ export function registerMcp(hw: Hardware, runScript: ScriptRunner): void {
       if (prev && prev.token !== s.token && server) listening.port = -1 // force a restart
       restart()
     }
-    for (const x of sessions.values()) if (x.clientId && !s.clients[x.clientId]) sessions.delete(x.id)
+    for (const x of sessions.values()) if (x.clientId && !s.clients[x.clientId]) x.close()
     return status()
   })
   ipcMain.handle(MCP.resolve, (_e, id: string, ok: boolean, session: boolean) => {
@@ -638,15 +651,15 @@ export function registerMcp(hw: Hardware, runScript: ScriptRunner): void {
     pending.delete(id)
   })
   ipcMain.handle(MCP.disconnect, (_e, c: ClientId) => {
-    for (const x of sessions.values()) if (x.clientId === c) sessions.delete(x.id)
+    for (const x of sessions.values()) if (x.clientId === c) x.close()
     pushStatus()
   })
   app.on('before-quit', () => server?.close())
 }
 
 /**
- * `Oscillo --mcp-stdio`: what stdio clients (Claude Desktop, Codex) launch. Relays JSON-RPC lines
- * from stdin to the running app's HTTP server and writes the answers to stdout.
+ * `Oscillo --mcp-stdio`: what stdio clients (Claude Desktop, Codex) launch. Relays MCP messages
+ * between stdio and the running app's Streamable HTTP server, using the SDK's transports.
  */
 export async function stdioBridge(): Promise<void> {
   let cfg: { port: number; token: string }
@@ -655,41 +668,18 @@ export async function stdioBridge(): Promise<void> {
   } catch {
     cfg = { port: 8765, token: '' }
   }
-  let session: string | undefined
-  const post = (body: string) =>
-    new Promise<{ status: number; body: string }>((resolve, reject) => {
-      const r = httpRequest({ host: '127.0.0.1', port: cfg.port, path: '/mcp', method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', Authorization: `Bearer ${cfg.token}`, ...(session ? { 'Mcp-Session-Id': session } : {}) } }, (res) => {
-        const sid = res.headers['mcp-session-id']
-        if (typeof sid === 'string') session = sid
-        let b = ''
-        res.on('data', (c) => (b += c))
-        res.on('end', () => resolve({ status: res.statusCode ?? 0, body: b }))
-      })
-      r.on('error', reject)
-      r.end(body)
-    })
-  let buf = ''
-  let chain = Promise.resolve()
-  process.stdin.setEncoding('utf8')
-  process.stdin.on('data', (chunk: string) => {
-    buf += chunk
-    let i: number
-    while ((i = buf.indexOf('\n')) >= 0) {
-      const line = buf.slice(0, i).trim()
-      buf = buf.slice(i + 1)
-      if (!line) continue
-      chain = chain.then(async () => {
-        let id: unknown = null
-        try {
-          id = (JSON.parse(line) as Json).id ?? null
-          const r = await post(line)
-          if (r.status === 200 && r.body) process.stdout.write(r.body.replace(/\n/g, ' ') + '\n')
-          else if (r.status >= 400 && id !== null) process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, error: { code: -32000, message: (JSON.parse(r.body || '{}') as Json).error ?? `HTTP ${r.status}` } }) + '\n')
-        } catch {
-          if (id !== null) process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, error: { code: -32000, message: 'Oscillo is not running, or its MCP server is off. Open Oscillo and turn on the server.' } }) + '\n')
-        }
-      })
-    }
-  })
-  process.stdin.on('end', () => void chain.then(() => app.exit(0)))
+  const stdio = new StdioServerTransport()
+  const http = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${cfg.port}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${cfg.token}` } } })
+  const fail = (m: JSONRPCMessage, e: unknown) => {
+    if (!isJSONRPCRequest(m)) return
+    const text = String((e as Error)?.message ?? e)
+    const message = /ECONNREFUSED|fetch failed/.test(text) ? 'Oscillo is not running, or its MCP server is off. Open Oscillo and turn on the server.' : text
+    void stdio.send({ jsonrpc: '2.0', id: m.id, error: { code: -32000, message } })
+  }
+  stdio.onmessage = (m) => void http.send(m).catch((e) => fail(m, e))
+  http.onmessage = (m) => void stdio.send(m)
+  http.onerror = () => {}
+  stdio.onclose = () => void http.close().finally(() => app.exit(0))
+  await http.start()
+  await stdio.start()
 }

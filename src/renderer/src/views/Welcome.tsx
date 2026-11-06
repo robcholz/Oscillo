@@ -63,7 +63,7 @@ export function Welcome() {
             No device connected. Connect one, or use the Demo Device to try every instrument.
           </Banner>
         ))}
-      <div className="flex max-w-[1120px] flex-col gap-6 p-6">
+      <div className="flex flex-col gap-6 p-4">
         <h2 className="m-0 text-xl font-semibold leading-[26px] tracking-[-0.4px]">Open an Instrument</h2>
         <Material className="grid grid-cols-[repeat(auto-fit,minmax(max(180px,25%),1fr))] overflow-hidden">
           {LAUNCH.map(({ id, text }) => {
