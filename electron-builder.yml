@@ -15,5 +15,9 @@ mac:
   target: dmg
   electronLanguages: [en]
   identity: null
+  # The WaveForms SDK, so Oscillo runs on Macs without WaveForms installed (see libs/dwf/macos).
+  extraFiles:
+    - from: libs/dwf/macos/dwf.framework
+      to: Frameworks/dwf.framework
 dmg:
   artifactName: Oscillo-${version}.${ext}

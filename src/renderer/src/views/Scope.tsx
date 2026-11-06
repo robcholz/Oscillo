@@ -16,7 +16,8 @@ import { Plot, type Series } from '../components/Plot'
 import { UnitInput } from '../components/UnitInput'
 import { histogram, spectrum } from '../sim/dsp'
 import { check } from '../sim/expr'
-import { capture, measure, reference, type Capture, type Stats } from '../sim/scope'
+import { capture, fromSamples, measure, reference, stats as recordStats, type Capture, type Stats } from '../sim/scope'
+import { hw, useHardware } from '../devices'
 import { useStore } from '../store'
 import { useScope, type ChannelId } from './scope-store'
 
@@ -74,14 +75,54 @@ export function Scope() {
   // Visible window, zoomed around the trigger position.
   const view = useMemo(() => ({ ...cfg, base: cfg.base / s.zoom }), [cfg, s.zoom])
 
+  const real = useHardware()
+  const inflight = useRef(false)
+  // A real device: one capture of both channels across the visible window, at the record length set.
+  const acquireHardware = async (): Promise<Capture | null> => {
+    if (!hw || inflight.current) return null
+    inflight.current = true
+    try {
+      const span = view.base * 10
+      const n = Math.max(16, Math.min(32768, s.samples))
+      const chans = (['C1', 'C2'] as const).map((c, i) => (cfg.ch[c].on ? i : -1)).filter((i) => i >= 0)
+      if (!chans.length) return null
+      const src = cfg.triggerSource === 'Channel 2' ? 1 : 0
+      const r = await hw.scope({
+        channels: chans,
+        rate: n / span,
+        samples: n,
+        range: { 0: cfg.ch.C1.range * 10 * cfg.ch.C1.probe, 1: cfg.ch.C2.range * 10 * cfg.ch.C2.probe },
+        offset: { 0: -cfg.ch.C1.offset, 1: -cfg.ch.C2.offset },
+        trigger:
+          cfg.triggerMode === 'None'
+            ? undefined
+            : { channel: src, level: cfg.level, slope: cfg.condition === 'Falling' ? 'Fall' : cfg.condition === 'Either' ? 'Either' : 'Rise', position: cfg.position, autoTimeout: cfg.triggerMode === 'Auto' ? 0.25 : 0 }
+      })
+      const pick = (i: number): Float64Array | null => (chans.includes(i) ? r.data[chans.indexOf(i)] : null)
+      return fromSamples(cfg, r.rate, pick(0), pick(1))
+    } catch (e) {
+      s.set({ running: false })
+      toast('Capture failed', { detail: (e as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') })
+      return null
+    } finally {
+      inflight.current = false
+    }
+  }
+
   const acquire = (): void => {
-    const c = capture(view)
+    if (real) {
+      void acquireHardware().then((c) => c && record(c, (ch) => recordStats(c.t, c[ch])))
+      return
+    }
+    record(capture(view), (ch) => measure(ch, cfg))
+  }
+  const record = (c: Capture, measureCh: (ch: 'C1' | 'C2' | 'M1') => Stats): void => {
     setCap(c)
     setHistory((h) => [...h.slice(-(s.history - 1)), c])
     setCapIndex(0)
     for (const m of s.measurements) {
       if (m.ch === 'R1') continue
-      const st = measure(m.ch as 'C1' | 'C2' | 'M1', cfg)
+      const st = measureCh(m.ch as 'C1' | 'C2' | 'M1')
       const v = pick(st, m.m).v
       const k = m.ch + m.m
       const a = stats.current[k] ?? { min: Infinity, max: -Infinity, sum: 0, n: 0, last: v }
@@ -99,7 +140,7 @@ export function Scope() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [live, s.updateMs, view, s.measurements])
   useEffect(() => {
-    if (!live) setCap(capture(view, 2000, 0.13))
+    if (!live && !real) setCap(capture(view, 2000, 0.13))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view])
 

@@ -3,8 +3,9 @@ import { Tooltip, cn } from '@robcholz/geist'
 import { Check, Cpu, PlugZap, Thermometer, TriangleAlert } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { ModelContextProtocolIcon, TypeScriptIcon } from '../components/icons'
-import { CONFIGS, devices } from '../devices'
+import { CONFIGS, useDevice } from '../devices'
 import type { PageId } from '../routes'
+import { useHwLive } from '../hwsync'
 import { useStore } from '../store'
 import { useMcpSummary } from '../views/mcp-store'
 
@@ -36,7 +37,10 @@ export function StatusBar() {
   const s = useStore()
   const mcp = useMcpSummary()
   const cfg = CONFIGS.find((c) => c.value === s.config) ?? CONFIGS[0]
-  const dev = s.device ? devices[s.device] : null
+  const dev = useDevice()
+  const mon = useHwLive((h) => h.monitor)
+  const temp = mon && Number.isFinite(mon.temperature) ? `${Math.round(mon.temperature)} °C` : '– °C'
+  const power = mon && Number.isFinite(mon.usb.volts * mon.usb.amps) ? `${(mon.usb.volts * mon.usb.amps).toFixed(2)} W` : '– W'
   const running = s.running && !!dev
   return (
     <footer
@@ -73,11 +77,11 @@ export function StatusBar() {
             <Sep className="max-[760px]:hidden" />
             <Item tip="Device temperature, limit 85 °C" className="max-[760px]:hidden">
               <Thermometer size={14} />
-              <span className={mono}>41 °C</span>
+              <span className={mono}>{temp}</span>
             </Item>
             <Item tip="USB power used of the 2.50 W limit" to="supplies" className="max-[1100px]:hidden">
               <PlugZap size={14} />
-              <span className={mono}>1.12 W / 2.50 W</span>
+              <span className={mono}>{power} / 2.50 W</span>
             </Item>
             <Item tip="Samples in the capture buffer" to="device-options" className="max-[1100px]:hidden">
               <Cpu size={14} />

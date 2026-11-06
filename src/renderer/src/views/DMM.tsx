@@ -8,7 +8,7 @@ import { persist } from 'zustand/middleware'
 import { LabeledSelect, PageBar, ScrollPage } from '../components/Page'
 import { si } from '../components/format'
 import { jitter, useInterval } from '../components/useInterval'
-import { devices } from '../devices'
+import { useDevice } from '../devices'
 import { useStore } from '../store'
 
 const FUNCTIONS = ['DC Voltage', 'AC Voltage', 'DC Current', 'AC Current', 'Resistance', 'Continuity', 'Diode', 'Temperature']
@@ -89,7 +89,7 @@ export function DMM() {
   }
 
   const fmt = (v: number) => (Number.isFinite(v) ? si(v, t.unit, digits) : '—')
-  const dev = app.device ? devices[app.device] : null
+  const dev = useDevice()
 
   return (
     <ScrollPage

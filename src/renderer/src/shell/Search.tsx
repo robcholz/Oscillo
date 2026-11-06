@@ -2,6 +2,7 @@
 import { CommandMenu, type CommandItem } from '@robcholz/geist'
 import { Keyboard, Monitor, Moon, PanelLeft, Play, Plug, Power, Save, Square, Sun } from 'lucide-react'
 import { pages } from '../routes'
+import { connectDevice } from '../devices'
 import { useStore } from '../store'
 import { useSidebarCollapsed } from './Sidebar'
 
@@ -31,8 +32,8 @@ export function Search() {
     },
     { id: 'save', group: 'Commands', label: 'Save Workspace', icon: <Save size={16} />, keys: ['⌘', 'S'], run: () => s.toast('Workspace saved', { detail: s.workspace + '.oscillo' }) },
     s.device
-      ? { id: 'disconnect', group: 'Commands', label: 'Disconnect Device', icon: <Power size={16} />, run: () => s.setDevice(null) }
-      : { id: 'connect', group: 'Commands', label: 'Connect Analog Discovery 3', icon: <Plug size={16} />, run: () => s.setDevice('AD3') },
+      ? { id: 'disconnect', group: 'Commands', label: 'Disconnect Device', icon: <Power size={16} />, run: () => void connectDevice(null) }
+      : { id: 'connect', group: 'Commands', label: 'Connect a Device', icon: <Plug size={16} />, run: () => s.go('device') },
     { id: 'shortcuts', group: 'Commands', label: 'Keyboard Shortcuts', icon: <Keyboard size={16} />, keywords: 'keys hotkeys', run: () => s.go('settings') },
     { id: 'sidebar', group: 'Commands', label: collapsed ? 'Expand Sidebar' : 'Collapse Sidebar', icon: <PanelLeft size={16} />, keys: ['⌘', 'B'], run: () => s.setSidebarCollapsed(!collapsed) },
     { id: 'light', group: 'Commands', label: 'Light Theme', icon: <Sun size={16} />, keywords: 'appearance mode', run: () => s.setTheme('light') },

@@ -11,6 +11,7 @@ import { Plot, type Series } from '../components/Plot'
 import { UnitInput } from '../components/UnitInput'
 import { jitter, useInterval } from '../components/useInterval'
 import { useStore } from '../store'
+import { isHardware, wantMeters } from '../hwsync'
 import { readChannel } from './meters'
 
 const HISTORY = ['1 Minute', '10 Minutes', '1 Hour', 'Unlimited'] as const
@@ -78,8 +79,9 @@ function sample(c: LogCh): number {
 
 const clampFn = (c: LogCh, v: number) => (c.fn === 'DC' || c.fn === 'Formula' ? v : Math.abs(v))
 
-/** Seed ten minutes of slowly drifting history so the plot is not empty on first open. */
+/** Seed ten minutes of slowly drifting history so the Demo Device's plot is not empty on first open. */
 function seed(channels: LogCh[]): Point[] {
+  if (isHardware()) return []
   const now = Date.now()
   const pts: Point[] = []
   const base = Object.fromEntries(channels.map((c) => [c.id, sample(c)]))
@@ -101,6 +103,7 @@ export function Logger() {
   useEffect(() => {
     memory = pts
   }, [pts])
+  useEffect(() => wantMeters(live), [live])
 
   useInterval(() => {
     const now = Date.now()

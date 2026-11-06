@@ -1,5 +1,7 @@
 import { Toaster, TooltipProvider } from '@robcholz/geist'
 import { useEffect } from 'react'
+import { startDevices } from '../devices'
+import { startHwSync } from '../hwsync'
 import { usePrefs } from '../prefs'
 import { useStore } from '../store'
 import { Header } from './Header'
@@ -11,6 +13,10 @@ import { useShortcuts } from './useShortcuts'
 
 export function App() {
   useShortcuts()
+  useEffect(() => {
+    void startDevices()
+    startHwSync()
+  }, [])
   const toasts = useStore((s) => s.toasts)
   const dismiss = useStore((s) => s.dismissToast)
   const animations = usePrefs((p) => p.animations)

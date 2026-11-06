@@ -1,7 +1,7 @@
 // Binds the installed WaveForms SDK library with koffi. Every function in dwf.h becomes a method of
 // DwfRaw; pointer parameters take typed arrays (or a Buffer for strings) that the SDK writes into.
-import { createRequire } from 'node:module'
 import { existsSync } from 'node:fs'
+import koffiModule from 'koffi'
 import { PROTOTYPES, TYPEDEFS, type DwfRaw } from './generated'
 
 /** Where WaveForms installs the SDK library on each platform. */
@@ -11,9 +11,9 @@ export function libraryCandidates(platform: NodeJS.Platform = process.platform):
   return ['/usr/lib/libdwf.so', '/usr/lib64/libdwf.so', '/usr/local/lib/libdwf.so', 'libdwf.so']
 }
 
-/** The first install location that exists, or null when WaveForms is not installed. */
-export function findLibrary(platform: NodeJS.Platform = process.platform): string | null {
-  for (const p of libraryCandidates(platform)) {
+/** The first location that exists, trying `preferred` (e.g. a copy bundled with the app) first; null when there is none. */
+export function findLibrary(preferred: string[] = [], platform: NodeJS.Platform = process.platform): string | null {
+  for (const p of [...preferred, ...libraryCandidates(platform)]) {
     // Bare names resolve through the system loader, so they count as found only if loading works.
     if (!p.includes('/') && !p.includes('\\')) return tryLoad(p) ? p : null
     if (existsSync(p)) return p
@@ -21,12 +21,10 @@ export function findLibrary(platform: NodeJS.Platform = process.platform): strin
   return null
 }
 
-type Koffi = typeof import('koffi')
-let koffi: Koffi | null = null
+type Koffi = typeof koffiModule
+const koffi: Koffi = koffiModule
 let aliased = false
 function getKoffi(): Koffi {
-  // Loaded on demand so the simulator and tests never need the native module.
-  koffi ??= createRequire(import.meta.url)('koffi') as Koffi
   if (!aliased) {
     for (const [name, base] of Object.entries(TYPEDEFS)) koffi.alias(name, base)
     aliased = true

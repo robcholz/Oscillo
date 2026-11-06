@@ -9,25 +9,22 @@ import {
   Settings, SlidersHorizontal, Square, Usb
 } from 'lucide-react'
 import { useState } from 'react'
-import { devices, type DeviceId } from '../devices'
+import { connectDevice, useDevice, useDevices, type DeviceId } from '../devices'
 import { useStore } from '../store'
 import { useMcpSummary } from '../views/mcp-store'
 import { useSidebarCollapsed } from './Sidebar'
 
-const deviceIcon = { AD3: Usb, DD: Usb, ADP3450: RadioTower, DEMO: Monitor }
+const deviceIcon = { USB: Usb, LAN: RadioTower, SIM: Monitor }
 
 export function Header() {
   const s = useStore()
   const mcp = useMcpSummary()
   const collapsed = useSidebarCollapsed()
   const [rename, setRename] = useState<string | null>(null)
-  const dev = s.device ? devices[s.device] : null
+  const dev = useDevice()
+  const list = useDevices((d) => d.list)
 
-  const setDevice = (id: DeviceId | null): void => {
-    s.setDevice(id)
-    if (id) s.toast('Connected to ' + devices[id].name)
-    else s.toast('Device disconnected', { detail: 'Reconnect to resume captures.' })
-  }
+  const setDevice = (id: DeviceId | null): void => void connectDevice(id)
   const toggleRun = (): void => {
     s.setRunning(!s.running)
     s.toast(s.running ? 'All instruments stopped' : 'All instruments running')
@@ -64,8 +61,8 @@ export function Header() {
             <>
               <MenuGroup label="Devices">
                 <MenuRadioGroup value={s.device ?? ''} onValueChange={(v) => v !== s.device && setDevice(v as DeviceId)}>
-                  {Object.values(devices).map((d) => {
-                    const Icon = deviceIcon[d.id]
+                  {list.map((d) => {
+                    const Icon = deviceIcon[d.link]
                     return (
                       <MenuRadioItem key={d.id} value={d.id}>
                         <Icon size={16} className="flex-none text-gray-900" />

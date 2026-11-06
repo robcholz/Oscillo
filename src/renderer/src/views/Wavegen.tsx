@@ -9,6 +9,7 @@ import { LabeledInput, LabeledSelect, PageBar, ScrollPage } from '../components/
 import { Plot } from '../components/Plot'
 import { UnitInput } from '../components/UnitInput'
 import { samples, type WaveType } from '../sim/wave'
+import { follow, pushWave } from '../hwsync'
 import { useStore } from '../store'
 
 const TYPES = [
@@ -309,5 +310,18 @@ export function Wavegen() {
         Supply mode and current limitation are available on Electronics Explorer only.
       </Note>
     </ScrollPage>
+  )
+}
+
+// Real hardware follows the generator settings, and stops when instruments stop.
+for (const i of [0, 1] as const) {
+  follow(
+    [useWavegen],
+    () => {
+      const c = useWavegen.getState().ch[i]
+      return { c: { run: c.run, out: c.out, type: c.type, freq: c.freq, amp: c.amp, offset: c.offset, sym: c.sym, phase: c.phase }, on: useStore.getState().running }
+    },
+    ({ c, on }) => pushWave(i, c, on),
+    `Wavegen Channel ${i + 1}`
   )
 }

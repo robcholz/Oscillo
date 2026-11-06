@@ -4,7 +4,7 @@ import { Button, Description, Fieldset, FormModal, Note, StatusDot, type FormFie
 import { FolderOpen, RefreshCw, Save } from 'lucide-react'
 import { useState } from 'react'
 import { PageBar, ScrollPage } from '../components/Page'
-import { devices } from '../devices'
+import { useDevice } from '../devices'
 import { useStore } from '../store'
 
 const STEPS = [
@@ -32,7 +32,7 @@ export function Calibration() {
   const [busy, setBusy] = useState(false)
   const [dialog, setDialog] = useState<null | { title: string; fields: FormField[]; submitLabel: string; onSubmit: (v: Record<string, string>) => void; description?: string }>(null)
   const update = (p: Partial<typeof st>) => setSt((x) => (memo = { ...x, ...p }))
-  const dev = app.device ? devices[app.device] : null
+  const dev = useDevice()
 
   const all = st.done >= N
   const v = Math.min(st.view, N - 1)

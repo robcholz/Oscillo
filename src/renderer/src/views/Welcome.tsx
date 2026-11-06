@@ -3,7 +3,7 @@ import { Banner, Button, FormModal, Material, Pill, Table } from '@robcholz/geis
 import { FolderOpen, Info, Plus, TriangleAlert } from 'lucide-react'
 import { useState } from 'react'
 import { PageBar, ScrollPage } from '../components/Page'
-import { devices } from '../devices'
+import { useDevice } from '../devices'
 import { pageById, type PageId } from '../routes'
 import { useStore } from '../store'
 
@@ -31,7 +31,7 @@ export function Welcome() {
   const [filter, setFilter] = useState<'all' | 'device' | 'shared'>('all')
   const [banner, setBanner] = useState(true)
   const [create, setCreate] = useState(false)
-  const dev = s.device ? devices[s.device] : null
+  const dev = useDevice()
   const rows = RECENT.filter((r) => (filter === 'shared' ? r.shared : filter === 'device' ? !!dev && r.d === dev.name : true))
 
   const open = (name: string) => {

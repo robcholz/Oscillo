@@ -8,7 +8,7 @@ import { persist } from 'zustand/middleware'
 import { OptionRow, PageBar, ScrollPage } from '../components/Page'
 import { UnitInput } from '../components/UnitInput'
 import { jitter, useInterval } from '../components/useInterval'
-import { devices } from '../devices'
+import { useDevice } from '../devices'
 import { useStore } from '../store'
 
 const DEFAULTS = {
@@ -39,7 +39,7 @@ const W = 'w-[180px]'
 export function DeviceOptions() {
   const o = useOpts()
   const app = useStore()
-  const dev = app.device ? devices[app.device] : null
+  const dev = useDevice()
   const pro = !!dev?.name.includes('Pro')
   const [mon, setMon] = useState(0)
   useInterval(() => setMon((m) => m + 1), 1500, !!app.device)

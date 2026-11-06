@@ -52,7 +52,7 @@ export const useStore = create<State>()(
       page: 'scope',
       theme: 'system',
       sidebarCollapsed: null,
-      device: 'AD3',
+      device: 'DEMO',
       running: true,
       workspace: 'Untitled',
       panels: {},

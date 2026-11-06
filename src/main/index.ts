@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, nativeTheme, shell } from 'electron'
 import { join } from 'node:path'
 import { IPC } from '../shared/ipc'
+import { registerHardware } from './hardware'
 
 /** background-100 of the theme showing, so a new or resized window never flashes the other one. */
 const windowBackground = (): string => (nativeTheme.shouldUseDarkColors ? '#0a0a0a' : '#ffffff')
@@ -43,6 +44,7 @@ ipcMain.on(IPC.setTheme, (_e, theme: unknown) => {
 })
 
 app.whenReady().then(() => {
+  registerHardware()
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

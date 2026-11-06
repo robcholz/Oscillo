@@ -13,7 +13,8 @@
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
-    "dist:mac": "electron-vite build && electron-builder --mac",
+    "sdk:mac": "node scripts/copy-dwf.mjs",
+    "dist:mac": "node scripts/copy-dwf.mjs --check && electron-vite build && electron-builder --mac",
     "screenshot": "electron-vite build && xvfb-run -a node scripts/screenshot.mjs screenshots"
   },
   "devDependencies": {

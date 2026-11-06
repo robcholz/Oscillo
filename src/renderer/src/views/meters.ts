@@ -1,6 +1,7 @@
-// Simulated DC / AC RMS / true RMS readings of the two scope inputs, driven by what the
-// waveform generator is outputting (W1 looped to C1, W2 to C2).
+// DC / AC RMS / true RMS of the two scope inputs. Real hardware reports what it measured (see
+// hwsync.ts); the Demo Device derives them from the waveform generator (W1 looped to C1, W2 to C2).
 import { samples } from '../sim/wave'
+import { isHardware, useHwLive } from '../hwsync'
 import { useWavegen } from './Wavegen'
 
 export interface Reading {
@@ -10,6 +11,7 @@ export interface Reading {
 }
 
 export function readChannel(i: 0 | 1, noise = 0.002): Reading {
+  if (isHardware()) return useHwLive.getState().meters?.[i] ?? { dc: 0, ac: 0, rms: 0 }
   const c = useWavegen.getState().ch[i]
   if (!c.run || !c.out) return { dc: rnd(noise), ac: Math.abs(rnd(noise)), rms: Math.abs(rnd(noise)) }
   const { v } = samples(c.type, { freq: c.freq, amp: c.amp, offset: c.offset, sym: c.sym, phase: c.phase, periods: 4, n: 800 })
