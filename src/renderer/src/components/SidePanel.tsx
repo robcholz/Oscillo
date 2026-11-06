@@ -2,7 +2,8 @@
 // resize, drag past the minimum or double-click to hide, click the edge tab to bring it back.
 // ⌥⌘0 toggles it. The width is remembered per page.
 import { Tooltip } from '@robcholz/geist'
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useRef, type ReactNode } from 'react'
+import { useCommand } from '../shell/commands'
 import { useStore } from '../store'
 
 const MIN = 264
@@ -16,16 +17,7 @@ export function SidePanel({ id, label, children }: { id: string; label: string; 
   const hidden = pref?.hidden ?? false
   const drag = useRef<{ x: number; w: number } | null>(null)
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.metaKey && e.altKey && e.code === 'Digit0') {
-        e.preventDefault()
-        setPanel(id, { hidden: !hidden })
-      }
-    }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [id, hidden, setPanel])
+  useCommand('toggle-panel', () => setPanel(id, { hidden: !hidden }))
 
   if (hidden)
     return (

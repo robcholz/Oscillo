@@ -7,6 +7,7 @@ import { registerFiles } from './files'
 import { registerFpga } from './fpga'
 import { registerHardware } from './hardware'
 import { registerMcp, stdioBridge } from './mcp'
+import { buildMenu } from './menu'
 import { registerScript, runCli } from './script'
 
 /** background-100 of the theme showing, so a new or resized window never flashes the other one. */
@@ -104,6 +105,7 @@ if (stdio) {
   app.whenReady().then(() => {
     // Packaged builds take the icon from build/icon.icns; in development the dock shows Electron's.
     if (!app.isPackaged) app.dock?.setIcon(join(app.getAppPath(), 'build', 'icon.png'))
+    buildMenu()
     const hw = registerHardware()
     registerFiles()
     registerCalibration(hw)

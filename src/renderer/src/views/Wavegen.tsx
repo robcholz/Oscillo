@@ -1,7 +1,8 @@
 // Waveform Generator (board: Wavegen). Two channels with a live preview, the mode tabs from
 // WaveForms (Simple → Play), sweep, modulation and a custom waveform editor.
+import { useCommand } from '../shell/commands'
 import { Button, DotsMenu, Material, MenuItem, MenuSeparator, Note, StatusDot, Switch, Tabs, Toggle } from '@robcholz/geist'
-import { ArrowUpDown, ChevronLeft, ChevronRight, Copy, Play, RefreshCw, Square, Upload } from 'lucide-react'
+import { ArrowUpDown, Copy, Play, Redo2, RefreshCw, Square, Undo2, Upload } from 'lucide-react'
 import { useState } from 'react'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
@@ -166,16 +167,24 @@ function CustomEditor() {
   const cw = w.custom
   const [drag, setDrag] = useState<number | null>(null)
   const edit = (points: number[]): void => w.set({ custom: { ...cw, points, past: [...cw.past.slice(-30), cw.points], future: [] } })
+  const undo = (): void => {
+    if (cw.past.length) w.set({ custom: { ...cw, points: cw.past[cw.past.length - 1], past: cw.past.slice(0, -1), future: [cw.points, ...cw.future] } })
+  }
+  const redo = (): void => {
+    if (cw.future.length) w.set({ custom: { ...cw, points: cw.future[0], future: cw.future.slice(1), past: [...cw.past, cw.points] } })
+  }
+  useCommand('undo', undo)
+  useCommand('redo', redo)
   return (
     <Material className="flex min-w-0 flex-col gap-3 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="m-0 text-sm font-semibold leading-5 tracking-[-0.28px]">Custom Waveform · wave-01</h2>
         <div className="flex gap-1">
-          <Button type="tertiary" size="small" svgOnly aria-label="Undo" tooltip tooltipKeys={['⌘', 'Z']} disabled={!cw.past.length} onClick={() => w.set({ custom: { ...cw, points: cw.past[cw.past.length - 1], past: cw.past.slice(0, -1), future: [cw.points, ...cw.future] } })}>
-            <ChevronLeft size={16} />
+          <Button type="tertiary" size="small" svgOnly aria-label="Undo" tooltip tooltipKeys={['⌘', 'Z']} disabled={!cw.past.length} onClick={undo}>
+            <Undo2 size={16} />
           </Button>
-          <Button type="tertiary" size="small" svgOnly aria-label="Redo" tooltip tooltipKeys={['⇧', '⌘', 'Z']} disabled={!cw.future.length} onClick={() => w.set({ custom: { ...cw, points: cw.future[0], future: cw.future.slice(1), past: [...cw.past, cw.points] } })}>
-            <ChevronRight size={16} />
+          <Button type="tertiary" size="small" svgOnly aria-label="Redo" tooltip tooltipKeys={['⇧', '⌘', 'Z']} disabled={!cw.future.length} onClick={redo}>
+            <Redo2 size={16} />
           </Button>
           <Button type="tertiary" size="small" prefix={<Upload size={16} />} onClick={async () => {
               const f = await openTable()
