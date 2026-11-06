@@ -18,6 +18,8 @@ import { useInterval } from '../components/useInterval'
 import { capture, decodeBus, decodeSpi, decodeUart, DURATION, levelAt, pulseStats, type DigitalSignal, type Frame } from '../sim/logic'
 import type { LogicReply } from '../../../shared/hw'
 import { hw, useHardware } from '../devices'
+import { publish, saveImage, saveTable, saveText, type Table as DataTable } from '../files'
+import { toggleLoggingFor, useLoggingOf } from '../logging'
 import { useStore } from '../store'
 
 const TRIGGERS = ['Ignore', 'Low', 'High', 'Rising', 'Falling', 'Either Edge']
@@ -47,6 +49,22 @@ function toSignals(r: LogicReply, sigs: Sig[]): Record<string, DigitalSignal> {
     out[g.id] = { init, edges }
   }
   return out
+}
+
+/** One row per edge with every signal's level, for Export and Logging. */
+function edgeTable(signals: Record<string, DigitalSignal>, sigs: Sig[]): DataTable {
+  const list = sigs.filter((g) => signals[g.id])
+  const times = [...new Set([0, ...list.flatMap((g) => signals[g.id].edges)])].sort((a, b) => a - b)
+  const data: number[][] = [times]
+  for (const g of list) {
+    const { init, edges } = signals[g.id]
+    let k = 0
+    data.push(times.map((t) => {
+      while (k < edges.length && edges[k] <= t) k++
+      return k % 2 ? 1 - init : init
+    }))
+  }
+  return { columns: ['Time (s)', ...list.map((g) => `${g.name} (${g.io})`)], data, at: Date.now() }
 }
 
 interface Sig {
@@ -130,7 +148,7 @@ export function Logic() {
   const [labels, setLabels] = useState<{ t: number; text: string }[]>([])
   const [filter, setFilter] = useState('')
   const [probe, setProbe] = useState<number | null>(null)
-  const [logging, setLogging] = useState(false)
+  const logging = useLoggingOf('Logic Analyzer')
   const [more, setMore] = useState(false)
   const [dialog, setDialog] = useState<null | { title: string; fields: FormField[]; submitLabel: string; onSubmit: (v: Record<string, string>) => void }>(null)
   const live = s.running && app.running && !!app.device
@@ -185,6 +203,10 @@ export function Logic() {
 
   const first = Math.max(1, latest - HISTORY + 1)
   const cap = useMemo(() => (real ? { index: capIndex, signals: hwCaps.current.get(capIndex) ?? {} } : capture(capIndex)), [capIndex, real])
+  useEffect(() => {
+    if (Object.keys(cap.signals).length) publish('Logic Analyzer', edgeTable(cap.signals, s.signals))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cap])
   const frames = useMemo(() => s.interps.map((it) => ({ it, frames: decode(it, cap.signals) })), [s.interps, cap])
   // UART shows TX and RX on their own lanes; other interpreters use one lane.
   const lanes = frames.flatMap(({ it, frames: fr }) =>
@@ -419,9 +441,9 @@ export function Logic() {
             aria-label="Plot Actions"
             menu={
               <>
-                <MenuItem prefix={<Download size={16} />} onSelect={() => toast('Exported logic.csv', { detail: `${shown.length} signals, 16,384 samples.` })}>Export Data</MenuItem>
-                <MenuItem prefix={<Upload size={16} />} onSelect={() => toast('Exported logic.png')}>Export Image</MenuItem>
-                <MenuItem prefix={<ScrollText size={16} />} onSelect={() => { setLogging(true); toast('Logging decoded data') }}>Start Logging</MenuItem>
+                <MenuItem prefix={<Download size={16} />} onSelect={() => void saveTable('logic.csv', edgeTable(cap.signals, shown))}>Export Data</MenuItem>
+                <MenuItem prefix={<Upload size={16} />} onSelect={() => void saveImage('logic.png')}>Export Image</MenuItem>
+                <MenuItem prefix={<ScrollText size={16} />} onSelect={() => toggleLoggingFor('Logic Analyzer')}>{logging ? 'Stop Logging' : 'Start Logging'}</MenuItem>
                 <MenuSeparator />
                 <MenuItem prefix={<ZoomIn size={16} />} onSelect={() => zoom(0.25)}>Zoom to Center</MenuItem>
               </>
@@ -574,10 +596,10 @@ export function Logic() {
       <div className="mt-1 flex items-center justify-between">
         <h2 className="m-0 text-base font-semibold leading-6 tracking-[-0.32px]">Decoded Data</h2>
         <div className="flex gap-2">
-          <Button type="tertiary" size="small" prefix={<ScrollText size={16} />} onClick={() => { setLogging(!logging); toast(logging ? 'Logging stopped' : 'Logging decoded data') }}>
+          <Button type="tertiary" size="small" prefix={<ScrollText size={16} />} onClick={() => toggleLoggingFor('Logic Analyzer')}>
             {logging ? 'Stop Logging' : 'Start Logging'}
           </Button>
-          <Button type="secondary" size="small" prefix={<Download size={16} />} onClick={() => toast('Exported decoded.csv', { detail: `${rows.length} frames.` })}>
+          <Button type="secondary" size="small" prefix={<Download size={16} />} disabled={!rows.length} onClick={() => void saveText('decoded.csv', ['Interpreter,Time,Data,MISO,Note', ...frames.flatMap(({ it, frames: fr }) => (it.kind === 'Bus' ? [] : fr.map((f) => [it.title, f.start, f.mo ?? '', f.mi ?? '', f.note ?? ''].map((x) => (typeof x === 'string' && /[",\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : String(x))).join(','))))].join('\n') + '\n')}>
             Export
           </Button>
         </div>

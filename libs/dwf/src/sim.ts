@@ -234,6 +234,8 @@ export function createSimDwf(opts: SimOptions = {}): DwfRaw {
     FDwfAnalogInChannelEnableSet: (h: number, c: number, v: number) => (!need(h) ? badHandle() : chIn(c) ? ((s.ain.enabled[c] = !!v), ok()) : fail(C.dwfercInvalidParameter1, 'Invalid channel')),
     FDwfAnalogInChannelRangeSet: (h: number, c: number, v: number) =>
       !need(h) ? badHandle() : chIn(c) ? ((s.ain.range[c] = v > 5 ? 50 : 5), ok()) : fail(C.dwfercInvalidParameter1, 'Invalid channel'),
+    // Sample modes are accepted; the simulator's samples are exact.
+    FDwfAnalogInChannelFilterSet: (h: number, c: number) => (!need(h) ? badHandle() : chIn(c) ? ok() : fail(C.dwfercInvalidParameter1, 'Invalid channel')),
     FDwfAnalogInChannelOffsetSet: (h: number, c: number, v: number) => (!need(h) ? badHandle() : chIn(c) ? ((s.ain.offset[c] = v), ok()) : fail(C.dwfercInvalidParameter1, 'Invalid channel')),
     FDwfAnalogInAcquisitionModeSet: (h: number, m: number) => (need(h) ? ((s.ain.mode = m), ok()) : badHandle()),
     FDwfAnalogInFrequencySet: (h: number, hz: number) => (need(h) ? ((s.ain.rate = RATE_MAX / Math.max(1, Math.round(RATE_MAX / Math.min(RATE_MAX, Math.max(1, hz))))), ok()) : badHandle()),
@@ -246,6 +248,12 @@ export function createSimDwf(opts: SimOptions = {}): DwfRaw {
     FDwfAnalogInTriggerLevelSet: (h: number, v: number) => (need(h) ? ((s.ain.trigLevel = v), ok()) : badHandle()),
     FDwfAnalogInTriggerConditionSet: (h: number, v: number) => (need(h) ? ((s.ain.trigSlope = v), ok()) : badHandle()),
     FDwfAnalogInTriggerPositionSet: (h: number, v: number) => (need(h) ? ((s.ain.trigPos = v), ok()) : badHandle()),
+    // Holdoff, hysteresis, filter and pulse lengths are accepted; the simulator triggers on edges.
+    FDwfAnalogInTriggerHoldOffSet: (h: number) => (need(h) ? ok() : badHandle()),
+    FDwfAnalogInTriggerHysteresisSet: (h: number) => (need(h) ? ok() : badHandle()),
+    FDwfAnalogInTriggerFilterSet: (h: number) => (need(h) ? ok() : badHandle()),
+    FDwfAnalogInTriggerLengthConditionSet: (h: number) => (need(h) ? ok() : badHandle()),
+    FDwfAnalogInTriggerLengthSet: (h: number) => (need(h) ? ok() : badHandle()),
     FDwfAnalogInTriggerAutoTimeoutSet: (h: number, v: number) => (need(h) ? ((s.ain.trigAuto = v), ok()) : badHandle()),
     FDwfAnalogInConfigure: (h: number, _re: number, start: number) => {
       if (!need(h)) return badHandle()

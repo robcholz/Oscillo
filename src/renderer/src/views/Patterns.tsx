@@ -11,6 +11,7 @@ import { parseSi } from '../components/UnitInput'
 import type { PatternRequest } from '../../../shared/hw'
 import { hw } from '../devices'
 import { follow } from '../hwsync'
+import { openTable } from '../files'
 import { useStore } from '../store'
 
 const TYPES = [
@@ -354,7 +355,14 @@ export function Patterns() {
         <Button type="tertiary" size="small" prefix={<Layers size={16} />} onClick={() => add('Binary Counter', 4)}>
           Add Bus
         </Button>
-        <Button type="tertiary" size="small" prefix={<Upload size={16} />} onClick={() => { setBits(Array.from({ length: 64 }, (_, i) => (i % 3 === 0 ? 1 : 0))); toast('Imported pattern.csv', { detail: '64 samples into the custom pattern.' }) }}>
+        <Button type="tertiary" size="small" prefix={<Upload size={16} />} onClick={async () => {
+          const f = await openTable()
+          if (!f) return
+          // The last column holds the samples, so a time column in front is skipped.
+          const col = f.data[f.data.length - 1].slice(0, 1024).map((v) => (v > 0.5 ? 1 : 0))
+          setBits(col)
+          toast(`Imported ${f.name}`, { detail: `${col.length} samples into the custom pattern. Values above 0.5 are high.` })
+        }}>
           Import CSV
         </Button>
         <Toggle checked={s.repeatTrigger} onChange={(repeatTrigger) => s.set({ repeatTrigger })}>

@@ -7,6 +7,7 @@ import { Grid2, LabeledInput, LabeledSelect, PageBar, PanelSection, SplitPage } 
 import { useInterval } from '../components/useInterval'
 import type { ProtocolCalls } from '../../../shared/hw'
 import { hw, useHardware } from '../devices'
+import { files } from '../files'
 import { useStore } from '../store'
 
 const TABS = ['UART', 'SPI', 'I2C', 'CAN', 'CEC', 'JTAG', 'SWD', 'AVR'] as const
@@ -810,7 +811,10 @@ export function Protocol() {
         <PanelSection title="Flash">
           <div className="flex gap-2">
             <div className="min-w-0 flex-1">{inp('aFile', 'HEX File', 'HEX file')}</div>
-            <Button size="small" type="secondary" prefix={<FolderOpen size={16} />} onClick={() => { setF((x) => ({ ...x, aFile: '~/avr/firmware.hex' })); toast('Chose firmware.hex') }}>
+            <Button size="small" type="secondary" prefix={<FolderOpen size={16} />} onClick={async () => {
+              const r = await files?.open([{ name: 'Intel HEX', extensions: ['hex', 'ihex'] }])
+              if (r) setF((x) => ({ ...x, aFile: r.path }))
+            }}>
               Browse
             </Button>
           </div>

@@ -10,6 +10,7 @@ import { Grid2, LabeledInput, LabeledSelect, PageBar, PanelSection, SplitPage } 
 import { Plot, type Series } from '../components/Plot'
 import { UnitInput } from '../components/UnitInput'
 import { jitter, useInterval } from '../components/useInterval'
+import { publish, saveTable, type Table as DataTable } from '../files'
 import { useStore } from '../store'
 import { isHardware, wantMeters } from '../hwsync'
 import { readChannel } from './meters'
@@ -100,8 +101,14 @@ export function Logger() {
   const [pts, setPts] = useState<Point[]>(() => (memory ??= seed(s.channels)))
   const [dialog, setDialog] = useState<null | { title: string; fields: FormField[]; submitLabel: string; onSubmit: (v: Record<string, string>) => void }>(null)
   const live = s.running && app.running && !!app.device
+  const logTable = (): DataTable => {
+    const t0 = pts[0]?.t ?? Date.now()
+    return { columns: ['Time (s)', ...s.channels.map((c) => c.name)], data: [pts.map((p) => (p.t - t0) / 1000), ...s.channels.map((c) => pts.map((p) => p.v[c.id] ?? NaN))], at: t0 }
+  }
   useEffect(() => {
     memory = pts
+    if (pts.length) publish('Logger', logTable())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pts])
   useEffect(() => wantMeters(live), [live])
 
@@ -173,7 +180,7 @@ export function Logger() {
       <Button size="small" type="tertiary" prefix={<Eraser size={16} />} onClick={() => { setPts([]); app.toast('Log cleared') }}>
         Clear
       </Button>
-      <Button size="small" type="secondary" prefix={<Download size={16} />} onClick={() => app.toast('Exported logger.csv', { detail: `${pts.length.toLocaleString()} rows, ${s.channels.length} channels.` })}>
+      <Button size="small" type="secondary" prefix={<Download size={16} />} onClick={() => void saveTable('logger.csv', logTable(), { time: 'Clock Time' })}>
         Export
       </Button>
       <Button size="small" prefix={live ? <Square size={16} /> : <Play size={16} />} onClick={() => { if (!app.running) app.setRunning(true); s.set({ running: !s.running }) }} tooltipKeys={['Space']}>

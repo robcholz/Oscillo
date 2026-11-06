@@ -1,9 +1,10 @@
 // ⌘K: every page plus the app-wide commands.
 import { CommandMenu, type CommandItem } from '@robcholz/geist'
-import { Keyboard, Monitor, Moon, PanelLeft, Play, Plug, Power, Save, Square, Sun } from 'lucide-react'
+import { FolderOpen, Keyboard, Monitor, Moon, PanelLeft, Play, Plug, Power, Save, Square, Sun } from 'lucide-react'
 import { pages } from '../routes'
 import { connectDevice } from '../devices'
 import { useStore } from '../store'
+import { openWorkspace, saveWorkspace } from '../workspace'
 import { useSidebarCollapsed } from './Sidebar'
 
 const groupOf = { Workspace: 'Workspace', Instruments: 'Instruments', Analysis: 'Analysis', Automation: 'Workspace', App: 'Workspace' } as const
@@ -30,7 +31,8 @@ export function Search() {
         s.toast(s.running ? 'All instruments stopped' : 'All instruments running')
       }
     },
-    { id: 'save', group: 'Commands', label: 'Save Workspace', icon: <Save size={16} />, keys: ['⌘', 'S'], run: () => s.toast('Workspace saved', { detail: s.workspace + '.oscillo' }) },
+    { id: 'save', group: 'Commands', label: 'Save Workspace', icon: <Save size={16} />, keys: ['⌘', 'S'], run: () => void saveWorkspace() },
+    { id: 'open', group: 'Commands', label: 'Open Workspace', icon: <FolderOpen size={16} />, keys: ['⌘', 'O'], run: () => void openWorkspace() },
     s.device
       ? { id: 'disconnect', group: 'Commands', label: 'Disconnect Device', icon: <Power size={16} />, run: () => void connectDevice(null) }
       : { id: 'connect', group: 'Commands', label: 'Connect a Device', icon: <Plug size={16} />, run: () => s.go('device') },

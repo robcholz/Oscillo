@@ -10,6 +10,8 @@ import { Plot } from '../components/Plot'
 import { UnitInput } from '../components/UnitInput'
 import { samples, type WaveType } from '../sim/wave'
 import { follow, pushWave } from '../hwsync'
+import { openTable } from '../files'
+import { compile as compileExpr } from '../sim/expr'
 import { useStore } from '../store'
 
 const TYPES = [
@@ -57,7 +59,7 @@ export const useWavegen = create<WG>()(
       ch: [def1, def2],
       sweep: { on: false, start: 100, stop: 10000, time: 1, scale: 'Linear', dampStart: 100, dampStop: 10 },
       mod: { kind: 'AM', carrier: 'Channel 1', type: 'Sine', freq: 10, index: 50, offset: 0, phase: 0 },
-      custom: { points: [0, 0.6, 0.4, 0.8, 0.1, -0.6, -0.3, -0.8, -0.1, 0.3, 0], past: [], future: [], formula: 'Math.sin(2 * Math.PI * x) * Math.exp(-3 * x)', n: 1024, rate: 'Use Frequency' },
+      custom: { points: [0, 0.6, 0.4, 0.8, 0.1, -0.6, -0.3, -0.8, -0.1, 0.3, 0], past: [], future: [], formula: 'sin(2 * pi * x) * exp(-3 * x)', n: 1024, rate: 'Use Frequency' },
       set: (p) => set(p),
       setCh: (i, p) => {
         const ch = get().ch.slice() as [Ch, Ch]
@@ -175,7 +177,14 @@ function CustomEditor() {
           <Button type="tertiary" size="small" svgOnly aria-label="Redo" tooltip tooltipKeys={['⇧', '⌘', 'Z']} disabled={!cw.future.length} onClick={() => w.set({ custom: { ...cw, points: cw.future[0], future: cw.future.slice(1), past: [...cw.past, cw.points] } })}>
             <ChevronRight size={16} />
           </Button>
-          <Button type="tertiary" size="small" prefix={<Upload size={16} />} onClick={() => app.toast('Imported wave-01.csv', { detail: '1,024 samples' })}>
+          <Button type="tertiary" size="small" prefix={<Upload size={16} />} onClick={async () => {
+              const f = await openTable()
+              if (!f) return
+              const v = f.data[f.data.length - 1].slice(0, 32768)
+              const peak = Math.max(1e-12, ...v.map(Math.abs))
+              edit(v.map((x) => x / peak))
+              app.toast(`Imported ${f.name}`, { detail: `${v.length.toLocaleString()} samples, scaled to ±1 (peak was ${+peak.toPrecision(3)}).` })
+            }}>
             Import CSV
           </Button>
           <Button type="secondary" size="small" onClick={() => { w.setCh(0, { type: 'Custom' }); app.toast('Custom waveform applied to Channel 1') }}>
@@ -227,7 +236,26 @@ function CustomEditor() {
         )}
       </div>
       <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3">
-        <LabeledInput label="Formula (TypeScript)" mono value={cw.formula} onChange={(e) => w.set({ custom: { ...cw, formula: e.target.value } })} />
+        <LabeledInput
+          label="Formula of x, 0 to 1 (Enter to Draw)"
+          mono
+          value={cw.formula}
+          onChange={(e) => w.set({ custom: { ...cw, formula: e.target.value } })}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter') return
+            e.preventDefault()
+            try {
+              // Accepts sin(), exp()… and also Math.sin, Math.PI as written in TypeScript.
+              const f = compileExpr(cw.formula.replace(/Math\./g, '').replace(/\bPI\b/g, 'pi'))
+              const pts = Array.from({ length: cw.n }, (_, k) => Math.max(-1, Math.min(1, f({ x: k / cw.n, pi: Math.PI, e: Math.E }))))
+              if (pts.some((v) => !Number.isFinite(v))) throw new Error('The formula is not a number for some x')
+              edit(pts)
+              app.toast('Waveform drawn from the formula', { detail: `${cw.n.toLocaleString()} samples, clipped to ±1.` })
+            } catch (err) {
+              app.toast('Could not draw the formula', { detail: (err as Error).message })
+            }
+          }}
+        />
         <UnitInput label="Samples" value={cw.n} integer min={2} max={32768} onCommit={(v) => w.set({ custom: { ...cw, n: v } })} />
         <LabeledSelect label="Play Rate" value={cw.rate} onValueChange={(v) => w.set({ custom: { ...cw, rate: v } })} options={['Use Frequency', '48 kHz', '1 MHz']} />
       </div>
@@ -325,7 +353,8 @@ for (const i of [0, 1] as const) {
         c: { run: c.run, out: c.out, type: c.type, freq: c.freq, amp: c.amp, offset: c.offset, sym: c.sym, phase: c.phase },
         on: useStore.getState().running,
         x: {
-          custom: c.type === 'Custom' || w.mod.type === 'Custom' ? w.custom.points : [],
+          custom: c.type === 'Custom' || c.type === 'Play' || w.mod.type === 'Custom' ? w.custom.points : [],
+          rate: w.custom.rate,
           sweep: i === 0 && w.sweep.on ? w.sweep : null,
           mod: w.mod.kind !== 'Off' && carrier === i ? { ...w.mod, kind: w.mod.kind } : null
         }

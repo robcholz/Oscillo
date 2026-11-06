@@ -1,6 +1,7 @@
 // Devices come from the main process: whatever the WaveForms SDK finds, plus the simulated Demo
 // Device. Connecting opens the device there; instruments then call `hw` (see src/main/hardware.ts).
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import type { HwApi, HwStatus, Link } from '../../shared/hw'
 import { useStore } from './store'
 
@@ -40,16 +41,31 @@ export const useHardware = (): boolean => {
   return !!d && d.link !== 'SIM'
 }
 
-export async function refreshDevices(): Promise<DeviceInfo[]> {
+/** Device Manager settings: names you gave devices, and how the list stays current. */
+interface DeviceSettings {
+  names: Partial<Record<DeviceId, string>>
+  autoRefresh: boolean
+  autoReconnect: boolean
+  set: (p: Partial<Omit<DeviceSettings, 'set'>>) => void
+}
+export const useDeviceSettings = create<DeviceSettings>()(
+  persist((set) => ({ names: {}, autoRefresh: true, autoReconnect: true, set: (p) => set(p) }), {
+    name: 'oscillo.devices',
+    partialize: ({ set: _s, ...r }) => ({ names: r.names, autoRefresh: r.autoRefresh, autoReconnect: r.autoReconnect })
+  })
+)
+
+export async function refreshDevices(opts: { quiet?: boolean } = {}): Promise<DeviceInfo[]> {
   if (!hw) return [DEMO]
-  useDevices.setState({ scanning: true })
+  if (!opts.quiet) useDevices.setState({ scanning: true })
   try {
     const [status, list] = await Promise.all([hw.status(), hw.devices()])
-    const mapped = list.map((d) => ({ id: d.key, name: d.name, serial: d.serial, link: d.link, busy: d.busy }))
+    const names = useDeviceSettings.getState().names
+    const mapped = list.map((d) => ({ id: d.key, name: names[d.key] || d.name, serial: d.serial, link: d.link, busy: d.busy }))
     useDevices.setState({ list: mapped, status })
     return mapped
   } finally {
-    useDevices.setState({ scanning: false })
+    if (!opts.quiet) useDevices.setState({ scanning: false })
   }
 }
 
@@ -82,6 +98,35 @@ export async function startDevices(): Promise<void> {
   const last = useStore.getState().device
   const pick = list.find((d) => d.id === last) ?? list.find((d) => d.link !== 'SIM' && !d.busy) ?? (last === null ? null : DEMO)
   if (pick) await connectDevice(pick.id, { quiet: true })
+  watchDevices()
+}
+
+/** Auto Refresh: notices devices plugged in or unplugged; Auto Reconnect brings the last one back. */
+let lost: DeviceId | null = null
+let watching = false
+function watchDevices(): void {
+  if (watching || !hw) return
+  watching = true
+  setInterval(async () => {
+    const set = useDeviceSettings.getState()
+    if (!set.autoRefresh || useDevices.getState().scanning) return
+    const before = useDevices.getState().list
+    const list = await refreshDevices({ quiet: true }).catch(() => null)
+    if (!list) return
+    const app = useStore.getState()
+    const cur = app.device
+    if (cur && cur !== DEMO.id && !list.some((d) => d.id === cur)) {
+      lost = cur
+      const name = before.find((d) => d.id === cur)?.name ?? cur
+      await hw?.close().catch(() => undefined)
+      app.setDevice(null)
+      app.toast(`${name} was unplugged`, { detail: set.autoReconnect ? 'It reconnects when you plug it back in.' : 'Connect it again in Device Manager.' })
+    } else if (!cur && lost && set.autoReconnect && list.some((d) => d.id === lost && !d.busy)) {
+      const id = lost
+      lost = null
+      if (await connectDevice(id, { quiet: true })) app.toast(`Reconnected to ${list.find((d) => d.id === id)?.name ?? id}`)
+    }
+  }, 3000)
 }
 
 /** Buffer configurations: memory split between instruments. */

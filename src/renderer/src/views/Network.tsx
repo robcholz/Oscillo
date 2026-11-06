@@ -2,7 +2,7 @@
 // channel against the reference as Bode, Nyquist and Nichols plots, with a sweep table.
 import { Button, DotsMenu, FormModal, LegendItem, MenuItem, MenuSeparator, Progress, StatusDot, Table, Tabs, type FormField } from '@robcholz/geist'
 import { Copy, Crosshair, Download, Maximize2, Pencil, Play, ScrollText, Square, StepForward, Upload, ZoomIn, ZoomOut } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { Cursor } from '../components/Cursor'
@@ -14,6 +14,8 @@ import { useInterval } from '../components/useInterval'
 import { lowPass, mag, phaseDeg, sweep } from '../sim/network'
 import { useHardware } from '../devices'
 import { cdiv, respond, useSweep } from '../hwsync'
+import { publish, saveImage, saveTable, type Table as DataTable } from '../files'
+import { toggleLoggingFor, useLoggingOf } from '../logging'
 import { useStore } from '../store'
 
 const TABS = ['Bode', 'Nyquist', 'Nichols', 'Time', 'Data'] as const
@@ -78,6 +80,7 @@ const useNetwork = create<NetState>()(
 export function Network() {
   const s = useNetwork()
   const app = useStore()
+  const logging = useLoggingOf('Network')
   const toast = app.toast
   const [tab, setTab] = useState<(typeof TABS)[number]>('Bode')
   const [done, setDone] = useState(s.steps)
@@ -116,6 +119,11 @@ export function Network() {
   const phY = Float64Array.from(H.slice(0, n), (h) => phaseDeg(h) + s.phaseOffset)
   const [x0, x1] = view ?? [s.start, s.stop]
   const xAxis = { min: x0, max: x1, unit: 'Hz', label: 'f', log }
+  const netTable = (): DataTable => ({ columns: ['Frequency (Hz)', `Magnitude (${s.units})`, 'Phase (°)'], data: [fx, magY, phY], at: Date.now() })
+  useEffect(() => {
+    if (n === s.steps) publish('Network', netTable())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [n === s.steps, H])
   const cur = freqs[n - 1]
   const hCur = H[n - 1]
 
@@ -165,7 +173,7 @@ export function Network() {
   if (tab === 'Bode')
     body = (
       <>
-        <Plot x={xAxis} y={s.units === 'dB' ? { min: s.top - s.range, max: s.top, unit: 'dB', divisions: 5 } : { min: 0, max: 1.5, unit: '×', divisions: 5 }} series={magSeries} ariaLabel="Magnitude" overlay={overlay} height="calc(240px + max(0px, (100vh - 900px) * 0.5))" />
+        <Plot x={xAxis} y={s.units === 'dB' ? { min: s.top - s.range, max: s.top, unit: 'dB', divisions: 5 } : { min: 0, max: 1.5, unit: '×', divisions: 5 }} series={magSeries} ariaLabel="Magnitude" overlay={overlay} onView={(a, b) => { a = Math.max(s.start, a); b = Math.min(s.stop, b); if (b > a * 1.01) setView(a <= s.start && b >= s.stop ? null : [a, b]) }} height="calc(240px + max(0px, (100vh - 900px) * 0.5))" />
         <Plot
           x={xAxis}
           y={{ min: s.phaseOffset - s.phaseRange, max: s.phaseOffset + (s.phaseRange > 180 ? s.phaseRange - 180 : 0), unit: '°', divisions: 4 }}
@@ -323,9 +331,9 @@ export function Network() {
               aria-label="Plot Actions"
               menu={
                 <>
-                  <MenuItem prefix={<Download size={16} />} onSelect={() => toast('Exported network.csv', { detail: `${n} steps.` })}>Export Data</MenuItem>
-                  <MenuItem prefix={<Upload size={16} />} onSelect={() => toast('Exported network.png')}>Export Image</MenuItem>
-                  <MenuItem prefix={<ScrollText size={16} />} onSelect={() => app.go('logger')}>Start Logging</MenuItem>
+                  <MenuItem prefix={<Download size={16} />} onSelect={() => void saveTable('network.csv', netTable())}>Export Data</MenuItem>
+                  <MenuItem prefix={<Upload size={16} />} onSelect={() => void saveImage('network.png')}>Export Image</MenuItem>
+                  <MenuItem prefix={<ScrollText size={16} />} onSelect={() => toggleLoggingFor('Network')}>{logging ? 'Stop Logging' : 'Start Logging'}</MenuItem>
                   <MenuSeparator />
                   <MenuItem prefix={<ZoomIn size={16} />} onSelect={() => setView([2000, 50000])}>Zoom to Corner</MenuItem>
                 </>

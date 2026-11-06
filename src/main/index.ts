@@ -1,6 +1,9 @@
 import { app, BrowserWindow, ipcMain, nativeTheme, shell } from 'electron'
 import { join } from 'node:path'
+import { FILES } from '../shared/files'
 import { IPC } from '../shared/ipc'
+import { registerCalibration } from './calibration'
+import { registerFiles } from './files'
 import { registerHardware } from './hardware'
 import { registerMcp, stdioBridge } from './mcp'
 import { registerScript, runCli } from './script'
@@ -10,6 +13,22 @@ const windowBackground = (): string => (nativeTheme.shouldUseDarkColors ? '#0a0a
 
 nativeTheme.on('updated', () => {
   for (const w of BrowserWindow.getAllWindows()) w.setBackgroundColor(windowBackground())
+})
+
+/** Workspace files asked for before the window could take them. */
+let toOpen: string[] = []
+const workspaceArg = (argv: string[]): string | undefined => argv.slice(1).find((a) => /\.(oscillo|oscproj)$/i.test(a))
+function openWorkspace(path: string): void {
+  const win = BrowserWindow.getAllWindows()[0]
+  if (!win || win.webContents.isLoading()) return void toOpen.push(path)
+  if (win.isMinimized()) win.restore()
+  win.focus()
+  win.webContents.send(FILES.opened, path)
+}
+// macOS: double-clicking a .oscillo file in Finder, or dropping it on the dock icon.
+app.on('open-file', (e, path) => {
+  e.preventDefault()
+  openWorkspace(path)
 })
 
 function createWindow(): void {
@@ -33,6 +52,10 @@ function createWindow(): void {
     }
   })
   win.once('ready-to-show', () => win.show())
+  win.webContents.on('did-finish-load', () => {
+    for (const p of toOpen) win.webContents.send(FILES.opened, p)
+    toOpen = []
+  })
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://')) void shell.openExternal(url)
     return { action: 'deny' }
@@ -64,15 +87,28 @@ if (stdio) {
     })
     app.exit(code)
   })
-} else
+} else if (!app.requestSingleInstanceLock()) {
+  // One window drives the device; a second launch hands its file to the first and quits.
+  app.quit()
+} else {
+  app.on('second-instance', (_e, argv) => {
+    const p = workspaceArg(argv)
+    if (p) openWorkspace(p)
+    else BrowserWindow.getAllWindows()[0]?.focus()
+  })
+  const first = workspaceArg(process.argv)
+  if (first) toOpen.push(first)
   app.whenReady().then(() => {
     const hw = registerHardware()
+    registerFiles()
+    registerCalibration(hw)
     registerMcp(hw, registerScript(hw))
     createWindow()
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })
   })
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin' && !stdio && scriptAt < 0) app.quit()

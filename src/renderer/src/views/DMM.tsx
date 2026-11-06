@@ -8,7 +8,7 @@ import { persist } from 'zustand/middleware'
 import { LabeledSelect, PageBar, ScrollPage } from '../components/Page'
 import { si } from '../components/format'
 import { jitter, useInterval } from '../components/useInterval'
-import { useDevice } from '../devices'
+import { hw, useDevice, useHardware } from '../devices'
 import { useStore } from '../store'
 
 const FUNCTIONS = ['DC Voltage', 'AC Voltage', 'DC Current', 'AC Current', 'Resistance', 'Continuity', 'Diode', 'Temperature']
@@ -16,6 +16,16 @@ const RANGES = ['Auto', '100 mV', '1 V', '10 V', '100 V']
 const RES = ['5½ Digits', '4½ Digits']
 const INPUTS = ['10 MΩ', '> 10 GΩ']
 
+/** DwfDmm modes from dwf.h. */
+const MODE: Record<string, number> = { Resistance: 1, Continuity: 2, Diode: 3, 'DC Voltage': 4, 'AC Voltage': 5, 'DC Current': 6, 'AC Current': 7, Temperature: 10 }
+/** A range like "10 V" in base units; 0 is auto. */
+const rangeOf = (r: string, _unit: string): number => {
+  if (r === 'Auto') return 0
+  const m = /([\d.]+)\s*(m)?/.exec(r)
+  return m ? Number(m[1]) * (m[2] ? 1e-3 : 1) : 0
+}
+
+/** The Demo Device's simulated readings. */
 const truth: Record<string, { v: number; unit: string; noise: number }> = {
   'DC Voltage': { v: 3.29871, unit: 'V', noise: 0.00004 },
   'AC Voltage': { v: 1.41402, unit: 'V', noise: 0.0002 },
@@ -60,11 +70,31 @@ export function DMM() {
   const stRef = useRef(st)
   stRef.current = st
 
-  useInterval(() => {
-    const v = t.v + jitter(t.noise) - (rel ?? 0)
+  const real = useHardware()
+  const dev = useDevice()
+  const hasDmm = !real || !!dev?.name.includes('5250')
+  const busy = useRef(false)
+  const add = (raw: number) => {
+    const v = raw - (rel ?? 0)
     const s = stRef.current
     setSt({ last: v, min: Math.min(s.min, v), max: Math.max(s.max, v), sum: s.sum + v, n: s.n + 1 })
-  }, d.res === '5½ Digits' ? 400 : 200, live)
+  }
+  useInterval(
+    () => {
+      if (!real) return add(t.v + jitter(t.noise))
+      if (busy.current || !hw) return
+      busy.current = true
+      hw.dmm(MODE[d.fn], rangeOf(d.range, t.unit))
+        .then(add)
+        .catch((e: Error) => {
+          d.set({ running: false })
+          app.toast('DMM stopped', { detail: e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') })
+        })
+        .finally(() => (busy.current = false))
+    },
+    d.res === '5½ Digits' ? 400 : 200,
+    live && hasDmm
+  )
 
   const change = (p: Partial<DMMState>) => {
     d.set(p)
@@ -89,7 +119,6 @@ export function DMM() {
   }
 
   const fmt = (v: number) => (Number.isFinite(v) ? si(v, t.unit, digits) : '—')
-  const dev = useDevice()
 
   return (
     <ScrollPage
@@ -108,9 +137,9 @@ export function DMM() {
         </PageBar>
       }
     >
-      {dev && !dev.name.includes('5250') && (
+      {dev && !hasDmm && (
         <Banner icon={<Info size={16} />} className="-mx-4 -mt-4 mb-0">
-          {dev.name} has no DMM. This view shows the Analog Discovery Pro 5250 layout.
+          {dev.name} has no DMM. Connect an Analog Discovery Pro 5250, or the Demo Device to try it.
         </Banner>
       )}
       <div className="grid grid-cols-[minmax(0,2fr)_minmax(280px,1fr)] gap-4 max-[1100px]:grid-cols-1">

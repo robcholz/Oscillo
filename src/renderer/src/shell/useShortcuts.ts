@@ -1,9 +1,10 @@
-// App-wide shortcuts, as in the design: ⌘K search, ⌘S save, ⌘B sidebar, ⌘R run script, ⌘1–6 instruments,
+// App-wide shortcuts, as in the design: ⌘K search, ⌘S save, ⌘O open, ⌘B sidebar, ⌘R run script, ⌘1–6 instruments,
 // ⌘, Settings, ⇧⌘L flips light and dark, Space runs or stops everything when nothing has focus.
 import { useEffect } from 'react'
 import { pages } from '../routes'
 import { useStore } from '../store'
 import { useScript } from '../views/script-store'
+import { openWorkspace, saveWorkspace } from '../workspace'
 import { useSidebarCollapsed } from './Sidebar'
 
 export function useShortcuts(): void {
@@ -20,7 +21,10 @@ export function useShortcuts(): void {
         s.setSearchOpen(!s.searchOpen)
       } else if (mod && !e.shiftKey && k === 's') {
         e.preventDefault()
-        s.toast('Workspace saved', { detail: s.workspace + '.oscillo' })
+        void saveWorkspace()
+      } else if (mod && !e.shiftKey && k === 'o') {
+        e.preventDefault()
+        void openWorkspace()
       } else if (mod && !e.shiftKey && k === 'b') {
         e.preventDefault()
         s.setSidebarCollapsed(!collapsed)

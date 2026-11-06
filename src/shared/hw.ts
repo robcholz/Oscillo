@@ -31,7 +31,22 @@ export interface ScopeRequest {
   samples: number
   range?: Record<number, number>
   offset?: Record<number, number>
-  trigger?: { channel: number; level: number; slope: 'Rise' | 'Fall' | 'Either'; position: number; autoTimeout: number }
+  /** 0 decimate, 1 average, 2 min/max, per channel. */
+  filter?: Record<number, number>
+  trigger?: {
+    channel: number
+    level: number
+    slope: 'Rise' | 'Fall' | 'Either'
+    position: number
+    autoTimeout: number
+    source?: number
+    type?: number
+    holdoff?: number
+    hysteresis?: number
+    filter?: number
+    lengthCondition?: number
+    length?: number
+  }
 }
 export interface ScopeReply {
   rate: number
@@ -89,7 +104,9 @@ export const HW = {
   logic: 'hw:logic',
   patterns: 'hw:patterns',
   patternsStop: 'hw:patterns-stop',
-  protocol: 'hw:protocol'
+  protocol: 'hw:protocol',
+  options: 'hw:options',
+  dmm: 'hw:dmm'
 } as const
 
 export interface LogicRequest {
@@ -147,6 +164,34 @@ export interface ProtocolCalls {
 }
 export const PROTOCOL_CALLS: (keyof ProtocolCalls)[] = ['uartSetup', 'uartSend', 'uartReceive', 'spiSetup', 'spiTransfer', 'i2cSetup', 'i2cTransfer', 'canSetup', 'canSend', 'canReceive', 'jtagSetup', 'jtagReset', 'jtagShift', 'jtagScan', 'swdSetup', 'swdConnect', 'swdTransfer', 'avrEnter', 'avrLeave', 'avrFuses', 'avrWriteFuses', 'avrReadFlashWord', 'avrReadEeprom', 'avrErase', 'avrProgram', 'avrVerify']
 
+/** Device Options, applied to the open device. */
+export interface OptionsRequest {
+  /** 0 keep running, 1 stop outputs, 2 shut down. */
+  onClose: 0 | 1 | 2
+  keepUsb: boolean
+  /** Amps. */
+  usbLimit: number
+  led: number
+  audio: boolean
+  sysFreq: number
+  /** 0 internal, 1 output on Trigger 2, 2 external input. */
+  clockMode: 0 | 1 | 2
+  refFreq: number
+  /** DIO bank, volts. */
+  digitalVolts: number
+  threshold: number
+  driveMa: number
+  slew: 0 | 1 | 2
+  pull: 'None' | 'Up' | 'Down'
+  /** TRIGSRC for each trigger pin; 0 makes it an input. */
+  triggers: number[]
+}
+/** Which options the device took, and which it does not have. */
+export interface OptionsReply {
+  applied: string[]
+  unsupported: string[]
+}
+
 export interface HwApi {
   status(): Promise<HwStatus>
   devices(): Promise<HwDevice[]>
@@ -162,5 +207,8 @@ export interface HwApi {
   logic(r: LogicRequest): Promise<LogicReply>
   patterns(p: PatternRequest[]): Promise<void>
   patternsStop(): Promise<void>
+  options(o: OptionsRequest): Promise<OptionsReply>
+  /** One DMM reading (Analog Discovery Pro 5250). `mode` is DwfDmm*, `range` 0 for auto. Throws when the device has none. */
+  dmm(mode: number, range: number): Promise<number>
   protocol<K extends keyof ProtocolCalls>(call: K, ...args: Parameters<ProtocolCalls[K]>): Promise<ReturnType<ProtocolCalls[K]>>
 }

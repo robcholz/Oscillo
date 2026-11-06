@@ -39,6 +39,8 @@ interface ScopeState {
   plotLabels: { text: string; x: number }[]
   measurements: Measurement[]
   audio: { on: boolean; src: string; vol: number }
+  /** Zero offset compensation per channel, volts subtracted from every capture. */
+  zero: Record<'C1' | 'C2', number>
   set: (p: Partial<Omit<ScopeState, 'set' | 'setCfg' | 'setCh'>>) => void
   setCfg: (p: Partial<ScopeCfg>) => void
   setCh: (ch: 'C1' | 'C2', p: Partial<ScopeCfg['ch']['C1']>) => void
@@ -93,10 +95,11 @@ export const useScope = create<ScopeState>()(
         { id: 6, ch: 'M1', m: 'Average' }
       ],
       audio: { on: false, src: 'Channel 1', vol: 60 },
+      zero: { C1: 0, C2: 0 },
       set: (p) => set(p),
       setCfg: (p) => set({ cfg: { ...get().cfg, ...p } }),
       setCh: (ch, p) => set({ cfg: { ...get().cfg, ch: { ...get().cfg.ch, [ch]: { ...get().cfg.ch[ch], ...p } } } })
     }),
-    { name: 'oscillo.scope', version: 1 }
+    { name: 'oscillo.scope', version: 1, merge: (p, c) => ({ ...c, ...(p as object), audio: { ...c.audio, ...(p as Partial<typeof c>)?.audio, on: false } }) }
   )
 )

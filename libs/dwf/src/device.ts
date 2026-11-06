@@ -144,6 +144,8 @@ const SLOPE: Record<Slope, number> = { Rise: C.DwfTriggerSlopeRise, Fall: C.DwfT
 export interface ScopeChannel {
   range?: number
   offset?: number
+  /** How samples above the rate are reduced: 0 decimate, 1 average, 2 min/max. */
+  filter?: number
 }
 export interface ScopeCapture {
   /** Channel indexes to capture, from 0. */
@@ -153,7 +155,25 @@ export interface ScopeCapture {
   samples: number
   /** Per channel, keyed by index. */
   setup?: Record<number, ScopeChannel>
-  trigger?: { channel: number; level: number; slope?: Slope; position?: number; autoTimeout?: number }
+  trigger?: {
+    channel: number
+    level: number
+    slope?: Slope
+    position?: number
+    autoTimeout?: number
+    /** TRIGSRC; the scope's own detector by default. */
+    source?: number
+    /** 0 edge, 1 pulse, 2 transition. */
+    type?: number
+    holdoff?: number
+    /** Volts; left to the device when unset. */
+    hysteresis?: number
+    /** 0 decimate, 1 average, 2 min/max. */
+    filter?: number
+    /** Pulse and transition: 0 less, 1 timeout, 2 more than `length` seconds. */
+    lengthCondition?: number
+    length?: number
+  }
   /** Gives up after this many ms. */
   timeout?: number
 }
@@ -189,14 +209,22 @@ class Scope {
       const s = o.setup?.[c]
       if (s?.range !== undefined) call(raw, 'FDwfAnalogInChannelRangeSet', h, c, s.range)
       if (s?.offset !== undefined) call(raw, 'FDwfAnalogInChannelOffsetSet', h, c, s.offset)
+      if (s?.filter !== undefined) call(raw, 'FDwfAnalogInChannelFilterSet', h, c, s.filter)
     }
     call(raw, 'FDwfAnalogInAcquisitionModeSet', h, C.acqmodeSingle)
     call(raw, 'FDwfAnalogInFrequencySet', h, o.rate)
     call(raw, 'FDwfAnalogInBufferSizeSet', h, o.samples)
     if (o.trigger) {
       const t = o.trigger
-      call(raw, 'FDwfAnalogInTriggerSourceSet', h, C.trigsrcDetectorAnalogIn)
-      call(raw, 'FDwfAnalogInTriggerTypeSet', h, C.trigtypeEdge)
+      call(raw, 'FDwfAnalogInTriggerSourceSet', h, t.source ?? C.trigsrcDetectorAnalogIn)
+      call(raw, 'FDwfAnalogInTriggerTypeSet', h, t.type ?? C.trigtypeEdge)
+      if (t.holdoff !== undefined) call(raw, 'FDwfAnalogInTriggerHoldOffSet', h, t.holdoff)
+      if (t.hysteresis !== undefined) call(raw, 'FDwfAnalogInTriggerHysteresisSet', h, t.hysteresis)
+      if (t.filter !== undefined) call(raw, 'FDwfAnalogInTriggerFilterSet', h, t.filter)
+      if (t.type && t.length !== undefined) {
+        call(raw, 'FDwfAnalogInTriggerLengthConditionSet', h, t.lengthCondition ?? 0)
+        call(raw, 'FDwfAnalogInTriggerLengthSet', h, t.length)
+      }
       call(raw, 'FDwfAnalogInTriggerChannelSet', h, t.channel)
       call(raw, 'FDwfAnalogInTriggerLevelSet', h, t.level)
       call(raw, 'FDwfAnalogInTriggerConditionSet', h, SLOPE[t.slope ?? 'Rise'])
@@ -440,6 +468,16 @@ export class Device {
 
   reset(): void {
     call(this.raw, 'FDwfDeviceReset', this.handle)
+  }
+
+  /** Sets a device parameter (DwfParam*, e.g. 4 = on close, 3 = LED brightness). */
+  param(param: number, value: number): void {
+    call(this.raw, 'FDwfDeviceParamSet', this.handle, param, value)
+  }
+
+  /** Drives an external trigger pin from a source (TRIGSRC, 0 = none: the pin is an input). */
+  triggerPin(pin: number, src: number): void {
+    call(this.raw, 'FDwfDeviceTriggerSet', this.handle, pin, src)
   }
 
   close(): void {

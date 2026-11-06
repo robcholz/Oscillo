@@ -4,6 +4,8 @@ import { startDevices } from '../devices'
 import { startHwSync } from '../hwsync'
 import { usePrefs } from '../prefs'
 import { useStore } from '../store'
+import { checkAtLaunch } from '../updates'
+import { openWorkspace, restoreOpened } from '../workspace'
 import { Header } from './Header'
 import { PageView } from './PageView'
 import { Search } from './Search'
@@ -16,6 +18,11 @@ export function App() {
   useEffect(() => {
     void startDevices()
     startHwSync()
+    restoreOpened()
+    void checkAtLaunch()
+    if (usePrefs.getState().onStart === 'Open Welcome' && !sessionStorage.getItem('oscillo-started')) useStore.getState().go('welcome')
+    sessionStorage.setItem('oscillo-started', '1')
+    return window.oscillo?.files.onOpened((p) => void openWorkspace(p))
   }, [])
   const toasts = useStore((s) => s.toasts)
   const dismiss = useStore((s) => s.dismissToast)

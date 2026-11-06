@@ -10,6 +10,7 @@ import { ChatGPTIcon, ClaudeCodeIcon, ClaudeIcon, CodexIcon } from '../component
 import { Grid2, PageBar, PanelSection, SplitPage } from '../components/Page'
 import { UnitInput } from '../components/UnitInput'
 import { useInterval } from '../components/useInterval'
+import { saveText } from '../files'
 import { useStore } from '../store'
 import { CLIENTS, TOOL_GROUPS, useMcp, type AuditRow, type ClientId, type Perm, type Result } from './mcp-store'
 
@@ -46,12 +47,6 @@ function Json({ data }: { data: Record<string, unknown> }) {
   )
 }
 
-function download(name: string, text: string): void {
-  const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }))
-  const a = Object.assign(document.createElement('a'), { href: url, download: name })
-  a.click()
-  setTimeout(() => URL.revokeObjectURL(url), 1000)
-}
 
 export function MCP() {
   const m = useMcp()
@@ -388,9 +383,8 @@ export function MCP() {
         ]}
         onSubmit={(v) => {
           const text = v.f === 'CSV' ? ['time,client,tool,result', ...m.rows.map((r) => [r.t, r.c, r.tool, r.r].join(','))].join('\n') : m.rows.map((r) => JSON.stringify(r)).join('\n')
-          download(v.n, text)
           setExportOpen(false)
-          toast(`Exported ${v.n}`, { detail: `${m.rows.length} entries` })
+          void saveText(v.n, text, [{ name: v.f, extensions: [v.f === 'CSV' ? 'csv' : 'jsonl'] }])
         }}
       />
 

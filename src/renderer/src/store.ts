@@ -78,6 +78,11 @@ export const useStore = create<State>()(
     {
       name: 'oscillo',
       version: 1,
+      // A page that was hidden since (FPGA Utility) opens the Scope instead.
+      merge: (p, c) => {
+        const m = { ...c, ...(p as Partial<State>) }
+        return m.page === 'fpga' ? { ...m, page: 'scope' } : m
+      },
       partialize: (s): Persisted => ({
         page: s.page,
         theme: s.theme,

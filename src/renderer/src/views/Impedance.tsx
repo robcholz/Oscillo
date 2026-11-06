@@ -2,7 +2,7 @@
 // frequency; Sweep mode plots them across frequency, plus a Smith chart and the sweep table.
 import { Button, DotsMenu, FormModal, LegendItem, Material, MenuItem, MenuSeparator, Note, StatusDot, Switch, Table, Tabs, type FormField, type StatusDotState } from '@robcholz/geist'
 import { Crosshair, Download, Maximize2, Pencil, Play, ScrollText, Square, StepForward, Upload, ZoomIn, ZoomOut } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { Cursor } from '../components/Cursor'
@@ -14,6 +14,8 @@ import { jitter, useInterval } from '../components/useInterval'
 import { impedance, mag, phaseDeg, sweep, type Complex } from '../sim/network'
 import { useHardware } from '../devices'
 import { cdiv, cscale, csub, respond, useSweep } from '../hwsync'
+import { publish, saveImage, saveTable, type Table as DataTable } from '../files'
+import { toggleLoggingFor, useLoggingOf } from '../logging'
 import { useStore } from '../store'
 
 const TABS = ['|Z| and Phase', 'R and X', 'Cs and Ls', 'Q and D', 'Smith', 'Data'] as const
@@ -33,7 +35,26 @@ interface ImpState {
   periods: number
   adapter: string
   comp: { open: boolean; short: boolean; load: boolean }
+  /** Measured fixture impedances at each frequency, for open, short and load compensation. */
+  compZ: { freqs: number[]; open?: Complex[]; short?: Complex[]; load?: Complex[]; loadOhms: number }
   set: (p: Partial<Omit<ImpState, 'set'>>) => void
+}
+
+const cmul = (a: Complex, b: Complex): Complex => ({ re: a.re * b.re - a.im * b.im, im: a.re * b.im + a.im * b.re })
+/** Removes the fixture: Z = (Zm − Zs) / (1 − (Zm − Zs) / (Zo − Zs)), then scales by the load's known value. */
+function compensate(zm: Complex, f: number, c: ImpState['compZ']): Complex {
+  if (!c.freqs.length) return zm
+  let i = 0
+  for (let k = 1; k < c.freqs.length; k++) if (Math.abs(c.freqs[k] - f) < Math.abs(c.freqs[i] - f)) i = k
+  const zs = c.short?.[i] ?? { re: 0, im: 0 }
+  const fix = (z: Complex) => {
+    const d = csub(z, zs)
+    if (!c.open) return d
+    return cdiv(d, csub({ re: 1, im: 0 }, cdiv(d, csub(c.open[i], zs))))
+  }
+  const z = fix(zm)
+  if (!c.load) return z
+  return cmul(z, cdiv({ re: c.loadOhms, im: 0 }, fix(c.load[i])))
 }
 
 const useImpedance = create<ImpState>()(
@@ -53,9 +74,10 @@ const useImpedance = create<ImpState>()(
       periods: 16,
       adapter: 'Impedance Analyzer Adapter',
       comp: { open: false, short: false, load: false },
+      compZ: { freqs: [], loadOhms: 1000 },
       set: (p) => set(p)
     }),
-    { name: 'oscillo.impedance', partialize: ({ set: _s, ...r }) => r }
+    { name: 'oscillo.impedance', partialize: ({ set: _s, ...r }) => r, merge: (p, c) => ({ ...c, ...(p as object), compZ: (p as Partial<ImpState>)?.compZ ?? c.compZ }) }
   )
 )
 
@@ -120,6 +142,7 @@ function Smith({ points, z0 = 50 }: { points: Complex[]; z0?: number }) {
 export function Impedance() {
   const s = useImpedance()
   const app = useStore()
+  const logging = useLoggingOf('Impedance')
   const toast = app.toast
   const [tab, setTab] = useState<(typeof TABS)[number]>('|Z| and Phase')
   const [done, setDone] = useState(s.steps)
@@ -145,8 +168,18 @@ export function Impedance() {
   const simZ = useMemo(() => freqs.map((f) => impedance(f)), [freqs])
   const Z = real && s.mode === 'Sweep' ? hwSweep.pts : simZ
   const n = real && s.mode === 'Sweep' ? hwSweep.done : Math.min(done, s.steps)
-  const D = Z.slice(0, n).map((z, i) => derived(z, freqs[i]))
+  const Zc = useMemo(() => Z.map((z, i) => compensate(z, freqs[i], s.compZ)), [Z, freqs, s.compZ])
+  const D = Zc.slice(0, n).map((z, i) => derived(z, freqs[i]))
   const fx = Float64Array.from(freqs.slice(0, n))
+  const impTable = (): DataTable => ({
+    columns: ['Frequency (Hz)', '|Z| (Ω)', 'Phase (°)', 'Rs (Ω)', 'Xs (Ω)', 'Cs (F)', 'Ls (H)'],
+    data: [fx, D.map((d) => d.z), D.map((d) => d.p), D.map((d) => d.rs), D.map((d) => d.xs), D.map((d) => d.cs), D.map((d) => d.ls)],
+    at: Date.now()
+  })
+  useEffect(() => {
+    if (n === s.steps && s.mode === 'Sweep') publish('Impedance', impTable())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [n === s.steps, Z])
   const [x0, x1] = view ?? [s.start, s.stop]
   const xAxis = { min: x0, max: x1, unit: 'Hz', label: 'f', log }
 
@@ -156,7 +189,7 @@ export function Impedance() {
     const z = impedance(s.freq)
     return { re: z.re * (1 + jitter(0.0008)), im: z.im * (1 + jitter(0.0008)) }
   }, [s.freq, tick, real, hwSweep.pts])
-  const m = derived(s.mode === 'Meter' ? meterZ : Z[n - 1] ?? meterZ, s.mode === 'Meter' ? s.freq : freqs[n - 1])
+  const m = derived(s.mode === 'Meter' ? compensate(meterZ, s.freq, s.compZ) : Zc[n - 1] ?? meterZ, s.mode === 'Meter' ? s.freq : freqs[n - 1])
 
   const run = () => {
     if (!app.device) return toast('No device connected', { detail: 'Connect a device, then press Run.' })
@@ -251,12 +284,20 @@ export function Impedance() {
       />
     )
 
-  const compCount = Object.values(s.comp).filter(Boolean).length
+  const compCount = (['open', 'short', 'load'] as const).filter((k) => s.compZ[k]).length
   const compDot: { state: StatusDotState; label: string } = compCount === 3 ? { state: 'READY', label: 'Open, Short and Load applied' } : compCount ? { state: 'BUILDING', label: `${compCount} of 3 steps done` } : { state: 'QUEUED', label: 'Not compensated' }
   const compStep = (k: keyof ImpState['comp'], what: string) => {
     if (!app.device) return toast('No device connected', { detail: 'Connect a device, then run compensation.' })
-    s.set({ comp: { ...s.comp, [k]: true } })
-    toast(`${k[0].toUpperCase() + k.slice(1)} compensation saved`, { detail: what })
+    if (!real) return toast('The Demo Device has no fixture to compensate', { detail: 'Compensation measures your probes and adapter on real hardware.' })
+    const meter = s.mode === 'Meter'
+    const raw = meter ? (hwSweep.pts[0] ? [hwSweep.pts[0]] : []) : hwSweep.done >= s.steps ? hwSweep.pts.slice(0, s.steps) : []
+    if (!raw.length) return toast('Wait for a full sweep', { detail: `${what} Then press ${k[0].toUpperCase() + k.slice(1)} once the sweep has finished.` })
+    const fs = meter ? [s.freq] : freqs
+    // A new frequency plan starts the compensation over.
+    const same = s.compZ.freqs.length === fs.length && s.compZ.freqs.every((f, i) => f === fs[i])
+    const base = same ? s.compZ : { freqs: fs, loadOhms: s.compZ.loadOhms }
+    s.set({ compZ: { ...base, [k]: raw }, comp: same ? { ...s.comp, [k]: true } : { open: false, short: false, load: false, [k]: true } })
+    toast(`${k[0].toUpperCase() + k.slice(1)} compensation saved`, { detail: `${what} ${raw.length} ${raw.length === 1 ? 'frequency' : 'frequencies'} measured.` })
   }
 
   const panel = (
@@ -287,13 +328,14 @@ export function Impedance() {
           <Button size="small" type="secondary" onClick={() => compStep('short', 'Probes shorted together.')}>
             Short
           </Button>
-          <Button size="small" type="secondary" onClick={() => compStep('load', 'Measured the 1 kΩ reference load.')}>
+          <Button size="small" type="secondary" onClick={() => compStep('load', `Measured the ${si(s.compZ.loadOhms, 'Ω')} reference load.`)}>
             Load
           </Button>
-          <Button size="small" type="tertiary" disabled={!compCount} onClick={() => { s.set({ comp: { open: false, short: false, load: false } }); toast('Compensation cleared') }}>
+          <Button size="small" type="tertiary" disabled={!compCount} onClick={() => { s.set({ comp: { open: false, short: false, load: false }, compZ: { freqs: [], loadOhms: s.compZ.loadOhms } }); toast('Compensation cleared') }}>
             Clear
           </Button>
         </div>
+        <UnitInput label="Load Value" value={s.compZ.loadOhms} suffix="Ω" min={1} onCommit={(loadOhms) => s.set({ compZ: { ...s.compZ, loadOhms } })} />
         <StatusDot state={compDot.state} label={compDot.label} />
       </PanelSection>
       <PanelSection title="Adapter">
@@ -363,9 +405,9 @@ export function Impedance() {
                 aria-label="Plot Actions"
                 menu={
                   <>
-                    <MenuItem prefix={<Download size={16} />} onSelect={() => toast('Exported impedance.csv', { detail: `${n} steps.` })}>Export Data</MenuItem>
-                    <MenuItem prefix={<Upload size={16} />} onSelect={() => toast('Exported impedance.png')}>Export Image</MenuItem>
-                    <MenuItem prefix={<ScrollText size={16} />} onSelect={() => app.go('logger')}>Start Logging</MenuItem>
+                    <MenuItem prefix={<Download size={16} />} onSelect={() => void saveTable('impedance.csv', impTable())}>Export Data</MenuItem>
+                    <MenuItem prefix={<Upload size={16} />} onSelect={() => void saveImage('impedance.png')}>Export Image</MenuItem>
+                    <MenuItem prefix={<ScrollText size={16} />} onSelect={() => toggleLoggingFor('Impedance')}>{logging ? 'Stop Logging' : 'Start Logging'}</MenuItem>
                     <MenuSeparator />
                     <MenuItem prefix={<ZoomIn size={16} />} onSelect={() => setView([1000, 100e3])}>Zoom to 1 kHz – 100 kHz</MenuItem>
                   </>

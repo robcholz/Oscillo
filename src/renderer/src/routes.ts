@@ -25,7 +25,7 @@ export interface PageInfo {
   keywords?: string
 }
 
-export const pages: PageInfo[] = [
+const all: PageInfo[] = [
   { id: 'welcome', label: 'Welcome', title: 'Welcome', icon: Layers, group: 'Workspace', keywords: 'home start recent' },
   { id: 'device', label: 'Device', title: 'Device Manager', icon: Usb, group: 'Workspace', keywords: 'connect' },
   { id: 'device-options', label: 'Device Options', title: 'Device Options', icon: SlidersHorizontal, group: 'Workspace', keywords: 'clock trigger' },
@@ -51,4 +51,8 @@ export const pages: PageInfo[] = [
   { id: 'fpga', label: 'FPGA Utility', title: 'FPGA Utility', icon: Cpu, group: 'App', keywords: 'program bitstream' }
 ]
 
-export const pageById = Object.fromEntries(pages.map((p) => [p.id, p])) as Record<PageId, PageInfo>
+/** Pages that are not real yet stay out of the sidebar, search and shortcuts. */
+const HIDDEN: PageId[] = ['fpga']
+export const pages: PageInfo[] = all.filter((p) => !HIDDEN.includes(p.id))
+
+export const pageById = Object.fromEntries(all.map((p) => [p.id, p])) as Record<PageId, PageInfo>

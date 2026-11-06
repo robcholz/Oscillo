@@ -51,6 +51,8 @@ interface WaveCh {
 /** What the generator page adds on top of a channel's carrier. */
 export interface WaveExtras {
   custom: number[]
+  /** Play: the rate the custom samples are played at ('Use Frequency', '48 kHz', '1 MHz'). */
+  rate?: string
   /** Frequency sweep, on Channel 1. */
   sweep: { on: boolean; start: number; stop: number; time: number; scale: string } | null
   /** AM or FM of this channel, if it is the carrier. */
@@ -60,14 +62,18 @@ export interface WaveExtras {
 const MOD_FUNC: Record<string, WaveRequest['func']> = { Sine: 'Sine', Square: 'Square', Triangle: 'Triangle' }
 
 /**
- * Starts or stops a generator channel to match its settings. Custom plays the drawn points; Play
- * (streaming a file) is not supported on hardware yet and plays a sine.
+ * Starts or stops a generator channel to match its settings. Custom repeats the drawn points once
+ * per period; Play repeats them at a fixed sample rate.
  */
 export async function pushWave(i: number, c: WaveCh, on: boolean, x: WaveExtras = { custom: [], sweep: null, mod: null }): Promise<void> {
   if (!hw) return
   if (!on || !c.run || !c.out) return hw.wavegenStop(i)
   const req: WaveRequest = { func: FUNC[c.type] ?? 'Sine', frequency: c.freq, amplitude: c.amp, offset: c.offset, symmetry: c.sym, phase: c.phase }
-  if (c.type === 'Custom' && x.custom.length > 1) req.data = x.custom
+  if ((c.type === 'Custom' || c.type === 'Play') && x.custom.length > 1) req.data = x.custom
+  if (c.type === 'Play' && x.custom.length > 1) {
+    const rate = x.rate === '48 kHz' ? 48e3 : x.rate === '1 MHz' ? 1e6 : 0
+    if (rate) req.frequency = rate / x.custom.length
+  }
   if (x.sweep?.on && x.sweep.stop > 0 && x.sweep.start > 0) {
     // FM moves the frequency to fc × (1 + depth × m(t)); a ramp from −1 to 1 sweeps start → stop.
     const { start, stop, time } = x.sweep

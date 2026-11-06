@@ -2,7 +2,7 @@
 // draggable cursors, harmonic components, and measurements computed from the bins.
 import { Button, DotsMenu, FormModal, LegendItem, MenuContent, MenuItem, MenuRoot, MenuSeparator, MenuTrigger, StatusDot, Switch, Table, Tabs, Textarea, type FormField } from '@robcholz/geist'
 import { ChevronDown, Copy, Crosshair, Download, Maximize2, Pencil, Play, Plus, ScrollText, Square, StepForward, Trash2, Upload, ZoomIn, ZoomOut } from 'lucide-react'
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { Cursor } from '../components/Cursor'
@@ -14,6 +14,8 @@ import { useInterval } from '../components/useInterval'
 import { analyze, metrics, testSignal, toDbv, WINDOWS, type WindowName } from '../sim/spectrum'
 import { useHardware } from '../devices'
 import { useCapture } from '../hwsync'
+import { publish, saveImage, saveTable, type Table as DataTable } from '../files'
+import { toggleLoggingFor, useLoggingOf } from '../logging'
 import { useStore } from '../store'
 
 const FS = 10000
@@ -98,6 +100,7 @@ const isLog = (u: string) => u.startsWith('dB')
 export function Spectrum() {
   const s = useSpectrum()
   const app = useStore()
+  const logging = useLoggingOf('Spectrum')
   const toast = app.toast
   const [tab, setTab] = useState<(typeof TABS)[number]>('Spectrum')
   const [frame, setFrame] = useState(0)
@@ -136,6 +139,16 @@ export function Spectrum() {
     }
   }, [spec, s.avg])
 
+  const specTable = (only?: Trace): DataTable => ({
+    columns: ['Frequency (Hz)', ...(only ? [only] : s.traces).map((t) => `${t.name} ${t.type} (Vrms)`)],
+    data: [spec.f, ...(only ? [only] : s.traces).map(traceData)],
+    at: Date.now(),
+    meta: { Window: s.window, 'Bin Width': si(spec.binHz, 'Hz') }
+  })
+  useEffect(() => {
+    publish('Spectrum', specTable())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spec])
   const traceData = (t: Trace): Float64Array => {
     const h = hold.current
     if (t.channel === 'Hold' && h.ref) return h.ref
@@ -237,7 +250,7 @@ export function Spectrum() {
 
   let body
   if (tab === 'Spectrum')
-    body = <Plot x={xAxis} y={yAxis} series={series} ariaLabel="Spectrum" overlay={overlay} probe="nearest" />
+    body = <Plot x={xAxis} y={yAxis} series={series} ariaLabel="Spectrum" overlay={overlay} probe="nearest" onView={(a, b) => { a = Math.max(0, a); b = Math.min(FS / 2, b); if (b - a > spec.binHz * 4) s.set({ start: a, stop: b }) }} />
   else if (tab === 'Time') {
     const n = Math.round(0.005 * FS)
     body = (
@@ -299,7 +312,7 @@ export function Spectrum() {
               menu={
                 <>
                   <MenuItem prefix={<Copy size={16} />} onSelect={() => { hold.current.ref = traceData(t).slice(); addTrace('Sample', 'Hold'); toast(`${t.name} held as reference`) }}>Hold as Reference</MenuItem>
-                  <MenuItem prefix={<Download size={16} />} onSelect={() => toast(`Exported ${t.name.toLowerCase().replace(' ', '-')}.csv`, { detail: `${spec.f.length.toLocaleString()} bins.` })}>Export Trace</MenuItem>
+                  <MenuItem prefix={<Download size={16} />} onSelect={() => void saveTable(`${t.name.toLowerCase().replace(/\s+/g, '-')}.csv`, specTable(t))}>Export Trace</MenuItem>
                   <MenuSeparator />
                   <MenuItem danger prefix={<Trash2 size={16} />} disabled={s.traces.length === 1} onSelect={() => s.set({ traces: s.traces.filter((x) => x.id !== t.id) })}>Remove</MenuItem>
                 </>
@@ -380,9 +393,9 @@ export function Spectrum() {
               aria-label="Plot Actions"
               menu={
                 <>
-                  <MenuItem prefix={<Download size={16} />} onSelect={() => toast('Exported spectrum.csv', { detail: `${spec.f.length.toLocaleString()} bins, ${s.traces.length} traces.` })}>Export Data</MenuItem>
-                  <MenuItem prefix={<Upload size={16} />} onSelect={() => toast('Exported spectrum.png')}>Export Image</MenuItem>
-                  <MenuItem prefix={<ScrollText size={16} />} onSelect={() => app.go('logger')}>Start Logging</MenuItem>
+                  <MenuItem prefix={<Download size={16} />} onSelect={() => void saveTable('spectrum.csv', specTable())}>Export Data</MenuItem>
+                  <MenuItem prefix={<Upload size={16} />} onSelect={() => void saveImage('spectrum.png')}>Export Image</MenuItem>
+                  <MenuItem prefix={<ScrollText size={16} />} onSelect={() => toggleLoggingFor('Spectrum')}>{logging ? 'Stop Logging' : 'Start Logging'}</MenuItem>
                   <MenuSeparator />
                   <MenuItem prefix={<ZoomIn size={16} />} onSelect={() => s.set({ start: Math.max(0, cursors[0] - 250), stop: cursors[0] + 250 })}>Zoom to X1</MenuItem>
                 </>

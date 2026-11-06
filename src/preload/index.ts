@@ -1,4 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import { CAL, type CalApi } from '../shared/calibration'
+import { FILES, type FilesApi } from '../shared/files'
 import { HW, type HwApi } from '../shared/hw'
 import { IPC, type ThemePref } from '../shared/ipc'
 import { MCP, type McpApi, type McpEvent } from '../shared/mcp'
@@ -40,12 +42,28 @@ const mcp: McpApi = {
   }
 }
 
+/** File dialogs and writes (src/main/files.ts). */
+const files = {
+  ...(Object.fromEntries(Object.entries(FILES).map(([k, ch]) => [k, invoke(ch)])) as unknown as FilesApi),
+  /** Workspace files opened from Finder or the command line. */
+  onOpened: (fn: (path: string) => void) => {
+    const h = (_e: unknown, p: string) => fn(p)
+    ipcRenderer.on(FILES.opened, h)
+    return () => void ipcRenderer.removeListener(FILES.opened, h)
+  }
+}
+
+/** Calibration (src/main/calibration.ts). */
+const calibration = Object.fromEntries(Object.entries(CAL).map(([k, ch]) => [k, invoke(ch)])) as unknown as CalApi
+
 const api = {
   platform: process.platform,
   setTheme: (theme: ThemePref): void => ipcRenderer.send(IPC.setTheme, theme),
   hw,
   script,
-  mcp
+  mcp,
+  files,
+  calibration
 }
 
 contextBridge.exposeInMainWorld('oscillo', api)
