@@ -8,6 +8,7 @@ import { PageBar, ScrollPage } from '../components/Page'
 import { UnitInput } from '../components/UnitInput'
 import { fixed } from '../components/format'
 import { jitter, useInterval } from '../components/useInterval'
+import { follow, isHardware, pushSupplies, useHwLive } from '../hwsync'
 import { useStore } from '../store'
 
 interface Rail {
@@ -39,8 +40,19 @@ const LOAD = 47
 const USB_LIMIT = 2.5
 const IDLE_W = 0.62
 
-function reading(r: Rail, live: boolean) {
+// Real hardware follows the switches and setpoints.
+follow([useSupplies], () => { const { master, pos, neg } = useSupplies.getState(); return { master, pos, neg } }, pushSupplies, 'the supplies')
+
+/** What a rail measures: from the device's monitor on real hardware, else the simulated load. */
+function reading(r: Rail, live: boolean, side: 'pos' | 'neg') {
   if (!live || !r.on) return { v: 0, i: 0, limited: false }
+  const mon = isHardware() ? useHwLive.getState().monitor : null
+  if (mon) {
+    const m = mon[side]
+    const v = Number.isFinite(m.volts) ? m.volts : 0
+    const i = Number.isFinite(m.amps) ? Math.abs(m.amps) : 0
+    return { v, i, limited: i >= r.limit * 0.98 }
+  }
   const want = Math.abs(r.volts) / LOAD
   const limited = want > r.limit
   const i = Math.min(want, r.limit)
@@ -51,7 +63,7 @@ function reading(r: Rail, live: boolean) {
 function RailCard({ name, rail, live, sign, onChange }: { name: string; rail: Rail; live: boolean; sign: 1 | -1; onChange: (r: Partial<Rail>) => void }) {
   const [, tick] = useState(0)
   useInterval(() => tick((n) => n + 1), 500, live && rail.on)
-  const m = reading(rail, live)
+  const m = reading(rail, live, sign > 0 ? 'pos' : 'neg')
   const watts = Math.abs(m.v * m.i)
   const state = !rail.on ? 'CANCELED' : m.limited ? 'ERROR' : live ? 'READY' : 'QUEUED'
   const label = !rail.on ? 'Off' : m.limited ? 'Current Limited' : live ? 'On' : 'Ready'
@@ -91,9 +103,11 @@ export function Supplies() {
   const live = s.master && !!app.device
   const [, tick] = useState(0)
   useInterval(() => tick((n) => n + 1), 1000, live)
-  const p = reading(s.pos, live)
-  const n = reading(s.neg, live)
-  const total = IDLE_W + Math.abs(p.v * p.i) + Math.abs(n.v * n.i)
+  const p = reading(s.pos, live, 'pos')
+  const n = reading(s.neg, live, 'neg')
+  const usb = useHwLive((h) => h.monitor?.usb)
+  const measured = isHardware() && !!usb && Number.isFinite(usb.volts) && Number.isFinite(usb.amps)
+  const total = measured ? usb.volts * usb.amps : IDLE_W + Math.abs(p.v * p.i) + Math.abs(n.v * n.i)
   const pct = Math.min(100, Math.round((total / USB_LIMIT) * 100))
 
   const setMaster = (master: boolean) => {

@@ -1,0 +1,6 @@
+framework module dwf {
+  umbrella header "dwf.h"
+  export *
+
+  module * { export * }
+}

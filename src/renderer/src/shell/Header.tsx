@@ -9,34 +9,36 @@ import {
   Settings, SlidersHorizontal, Square, Usb
 } from 'lucide-react'
 import { useState } from 'react'
-import { devices, type DeviceId } from '../devices'
+import { connectDevice, useDevice, useDevices, type DeviceId } from '../devices'
 import { useStore } from '../store'
 import { useMcpSummary } from '../views/mcp-store'
+import { openWorkspace, saveWorkspace } from '../workspace'
 import { useSidebarCollapsed } from './Sidebar'
 
-const deviceIcon = { AD3: Usb, DD: Usb, ADP3450: RadioTower, DEMO: Monitor }
+const deviceIcon = { USB: Usb, LAN: RadioTower, SIM: Monitor }
 
 export function Header() {
   const s = useStore()
   const mcp = useMcpSummary()
   const collapsed = useSidebarCollapsed()
   const [rename, setRename] = useState<string | null>(null)
-  const dev = s.device ? devices[s.device] : null
+  const [saveAs, setSaveAs] = useState(false)
+  const dev = useDevice()
+  const list = useDevices((d) => d.list)
 
-  const setDevice = (id: DeviceId | null): void => {
-    s.setDevice(id)
-    if (id) s.toast('Connected to ' + devices[id].name)
-    else s.toast('Device disconnected', { detail: 'Reconnect to resume captures.' })
-  }
+  const setDevice = (id: DeviceId | null): void => void connectDevice(id)
   const toggleRun = (): void => {
     s.setRunning(!s.running)
     s.toast(s.running ? 'All instruments stopped' : 'All instruments running')
   }
   const saveRename = (): void => {
     const n = (rename ?? '').trim() || 'Untitled'
-    s.setWorkspace(n)
     setRename(null)
-    s.toast('Workspace saved', { detail: n + '.oscillo' })
+    if (saveAs) void saveWorkspace({ as: true, name: n })
+    else {
+      s.setWorkspace(n)
+      s.toast('Workspace renamed', { detail: 'Save it to write the new name to a file.' })
+    }
   }
 
   return (
@@ -64,8 +66,8 @@ export function Header() {
             <>
               <MenuGroup label="Devices">
                 <MenuRadioGroup value={s.device ?? ''} onValueChange={(v) => v !== s.device && setDevice(v as DeviceId)}>
-                  {Object.values(devices).map((d) => {
-                    const Icon = deviceIcon[d.id]
+                  {list.map((d) => {
+                    const Icon = deviceIcon[d.link]
                     return (
                       <MenuRadioItem key={d.id} value={d.id}>
                         <Icon size={16} className="flex-none text-gray-900" />
@@ -86,7 +88,7 @@ export function Header() {
               {s.device ? (
                 <MenuItem danger prefix={<Power size={16} />} onSelect={() => setDevice(null)}>Disconnect</MenuItem>
               ) : (
-                <MenuItem prefix={<Plug size={16} />} onSelect={() => setDevice('AD3')}>Connect Analog Discovery 3</MenuItem>
+                <MenuItem prefix={<Plug size={16} />} onSelect={() => s.go('device')}>Connect a Device…</MenuItem>
               )}
             </>
           }
@@ -101,13 +103,13 @@ export function Header() {
           className="max-[1060px]:hidden"
           menu={
             <>
-              <MenuItem prefix={<Save size={16} />} shortcut={['⌘', 'S']} onSelect={() => s.toast('Workspace saved', { detail: s.workspace + '.oscillo' })}>
+              <MenuItem prefix={<Save size={16} />} shortcut={['⌘', 'S']} onSelect={() => void saveWorkspace()}>
                 Save Workspace
               </MenuItem>
-              <MenuItem prefix={<Save size={16} />} onSelect={() => setRename(s.workspace)}>Save Workspace As…</MenuItem>
-              <MenuItem prefix={<Pencil size={16} />} onSelect={() => setRename(s.workspace)}>Rename…</MenuItem>
+              <MenuItem prefix={<Save size={16} />} onSelect={() => { setSaveAs(true); setRename(s.workspace) }}>Save Workspace As…</MenuItem>
+              <MenuItem prefix={<Pencil size={16} />} onSelect={() => { setSaveAs(false); setRename(s.workspace) }}>Rename…</MenuItem>
               <MenuSeparator />
-              <MenuItem prefix={<FolderOpen size={16} />} onSelect={() => s.go('welcome')}>Open Workspace…</MenuItem>
+              <MenuItem prefix={<FolderOpen size={16} />} shortcut={['⌘', 'O']} onSelect={() => void openWorkspace()}>Open Workspace…</MenuItem>
               <MenuItem prefix={<Download size={16} />} onSelect={() => s.go('export')}>Export and Logging</MenuItem>
             </>
           }
@@ -169,7 +171,7 @@ export function Header() {
       <Modal
         open={rename !== null}
         onClose={() => setRename(null)}
-        title="Rename Workspace"
+        title={saveAs ? 'Save Workspace As' : 'Rename Workspace'}
         onSubmit={saveRename}
         actions={
           <>
@@ -177,7 +179,7 @@ export function Header() {
               Cancel
             </Button>
             <Button size="small" typeName="submit">
-              Save Workspace
+              {saveAs ? 'Choose Location' : 'Rename'}
             </Button>
           </>
         }

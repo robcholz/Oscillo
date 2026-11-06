@@ -5,7 +5,8 @@ import { Check, ChevronRight, CircleX, FileCode, FileText, Pencil, Play, Plus, S
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { CodeEditor, highlight } from '../components/Code'
 import { Grid2, PageBar, PanelSection, SplitPage } from '../components/Page'
-import { LIB, TEMPLATES, TYPES, hasProblem, useScript, type BottomTab } from './script-store'
+import { useMcp } from './mcp-store'
+import { LIB, TEMPLATES, TYPES, useScript, type BottomTab } from './script-store'
 
 function Folder({ name, files, cur, onOpen, initial = true }: { name: string; files: string[]; cur: string; onOpen: (f: string) => void; initial?: boolean }) {
   const [open, setOpen] = useState(initial || files.includes(cur))
@@ -41,32 +42,32 @@ function Folder({ name, files, cur, onOpen, initial = true }: { name: string; fi
 
 export function Script() {
   const s = useScript()
+  const exe = useMcp((m) => m.status?.stdio.replace(/ --mcp-stdio$/, '') ?? 'Oscillo')
   const [newOpen, setNewOpen] = useState(false)
   const code = s.files[s.cur] ?? ''
   const lines = code.split('\n')
   const bps = s.bps[s.cur] ?? []
-  const prob = hasProblem(code)
+  const probs = s.problems[s.cur] ?? []
+  const prob = probs.length > 0
+  const probLines = new Set(probs.map((p) => p.line))
   const r = s.run
   const paused = r.status === 'paused'
+  const active = paused || r.status === 'running'
   const here = paused && r.file === s.cur ? r.line : 0
-  const failedHere = r.status === 'failed' && r.file === s.cur
+  const failedHere = r.status === 'failed' && r.file === s.cur ? r.line : 0
+  useEffect(() => {
+    void s.checkNow()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [s.cur])
   const logRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight })
   }, [s.cons.length, s.btab])
 
   const [dot, label]: [StatusDotState, string] =
-    r.status === 'paused' ? ['BUILDING', `Paused at Line ${r.line}`] : r.status === 'done' ? ['READY', 'Finished'] : r.status === 'stopped' ? ['CANCELED', 'Stopped'] : r.status === 'failed' ? ['ERROR', 'Failed at Line 10'] : ['QUEUED', 'Ready']
+    r.status === 'paused' ? ['BUILDING', `Paused at Line ${r.line}`] : r.status === 'running' ? ['BUILDING', 'Running'] : r.status === 'done' ? ['READY', 'Finished'] : r.status === 'stopped' ? ['CANCELED', 'Stopped'] : r.status === 'failed' ? ['ERROR', r.line ? `Failed at Line ${r.line}` : 'Failed'] : ['QUEUED', 'Ready']
   const scripts = Object.keys(s.files).filter((f) => !LIB.includes(f) && !TYPES.includes(f))
-  const sweepVars = r.file === 'frequency-sweep.ts' && r.status !== 'stopped' && r.status !== 'idle'
-  const vars = sweepVars
-    ? [
-        { n: 'f', v: String(r.f), t: 'number' },
-        { n: 'capture', v: r.line >= 10 || r.status === 'done' ? 'Capture { 8192 samples }' : 'undefined', t: 'Capture' },
-        { n: 'vpp', v: r.vpp ?? 'undefined', t: 'number' },
-        { n: 'log', v: 'File("sweep.csv")', t: 'File' }
-      ]
-    : []
+  const vars = paused ? r.vars : []
 
   const bar = (
     <PageBar title="Script" status={<StatusDot state={dot} label={label} />}>
@@ -79,10 +80,10 @@ export function Script() {
       <Button type="secondary" size="small" svgOnly aria-label="Step Over" tooltip tooltipPosition="bottom" disabled={!paused} onClick={s.step}>
         <StepForward size={16} />
       </Button>
-      <Button type="secondary" size="small" prefix={<Square size={16} />} disabled={!paused} onClick={s.stop}>
+      <Button type="secondary" size="small" prefix={<Square size={16} />} disabled={!active} onClick={s.stop}>
         Stop
       </Button>
-      <Button type="error" size="small" prefix={<X size={16} />} disabled={!paused} onClick={s.abort}>
+      <Button type="error" size="small" prefix={<X size={16} />} disabled={!active} onClick={s.abort}>
         Abort
       </Button>
     </PageBar>
@@ -132,15 +133,15 @@ export function Script() {
         </Grid2>
       </PanelSection>
       <PanelSection title="Run from Terminal" className="shadow-none">
-        <p className="m-0 text-[13px] leading-[18px] text-gray-900">Runs the open script without the app, with the options above.</p>
-        <Snippet text={`oscillo --script ${s.cur}${s.sandbox === 'Isolated' ? '' : s.sandbox === 'Allow Files' ? ' --allow-files' : ' --allow-net'}${s.timeout === '30 s' ? '' : s.timeout === 'None' ? ' --timeout 0' : ' --timeout 300'}`} />
+        <p className="m-0 text-[13px] leading-[18px] text-gray-900">Runs the open script without the window, with the options above. Scripts are saved to Documents/Oscillo/Scripts.</p>
+        <Snippet text={`${exe} --script ${s.cur}${s.sandbox === 'Allow Network' ? ' --allow-net' : s.sandbox === 'Allow Files' ? ' --allow-files' : ''}${s.timeout === '30 s' ? '' : s.timeout === 'None' ? ' --timeout 0' : ' --timeout 300'}`} />
       </PanelSection>
     </>
   )
 
   const tabs = [
     { title: 'Console', value: 'c' },
-    { title: prob ? 'Problems (1)' : 'Problems', value: 'p' },
+    { title: prob ? `Problems (${probs.length})` : 'Problems', value: 'p' },
     { title: 'Variables', value: 'v' }
   ]
 
@@ -166,9 +167,9 @@ export function Script() {
             {lines.map((t, i) => {
               const n = i + 1
               const bp = bps.includes(n)
-              const err = prob && /PeakToPeek/.test(t)
+              const err = probLines.has(n)
               return (
-                <div key={i} className={cn('grid grid-cols-[48px_minmax(0,1fr)] font-mono text-[13px] leading-5', n === here ? 'bg-amber-100' : failedHere && err && 'bg-red-100')} onDoubleClick={() => s.set({ editing: true })}>
+                <div key={i} title={err ? probs.filter((p) => p.line === n).map((p) => p.message).join('\n') : undefined} className={cn('grid grid-cols-[48px_minmax(0,1fr)] font-mono text-[13px] leading-5', n === here ? 'bg-amber-100' : n === failedHere && 'bg-red-100')} onDoubleClick={() => s.set({ editing: true })}>
                   <button
                     type="button"
                     aria-label={`${bp ? 'Remove breakpoint on' : 'Add breakpoint on'} line ${n}`}
@@ -212,17 +213,23 @@ export function Script() {
             ))}
           {s.btab === 'p' &&
             (prob ? (
-              <div className="flex items-start gap-3 p-4">
-                <CircleX size={16} className="mt-0.5 flex-none text-red-900" />
-                <div className="flex min-w-0 flex-1 flex-col gap-1">
-                  <div className="text-sm">"PeakToPeek" is not a MeasurementName. Did you mean "PeakToPeak"?</div>
-                  <div className="font-mono text-xs text-gray-900">
-                    {s.cur} · Ln {lines.findIndex((l) => /PeakToPeek/.test(l)) + 1}, Col {(lines.find((l) => /PeakToPeek/.test(l)) ?? '').indexOf('PeakToPeek')} · ts(2345)
+              <div className="flex flex-col">
+                {probs.map((p, k) => (
+                  <div key={k} className="flex items-start gap-3 px-4 py-3 shadow-[inset_0_-1px_0_var(--gray-alpha-200)]">
+                    <CircleX size={16} className="mt-0.5 flex-none text-red-900" />
+                    <div className="flex min-w-0 flex-1 flex-col gap-1">
+                      <div className="text-sm">{p.message}</div>
+                      <div className="font-mono text-xs text-gray-900">
+                        {p.file} · Ln {p.line}, Col {p.col} · ts({p.code})
+                      </div>
+                    </div>
+                    {p.fix && (
+                      <Button type="secondary" size="small" prefix={<WandSparkles size={16} />} onClick={() => s.quickFix(p)}>
+                        Quick Fix
+                      </Button>
+                    )}
                   </div>
-                </div>
-                <Button type="secondary" size="small" prefix={<WandSparkles size={16} />} onClick={s.quickFix}>
-                  Quick Fix
-                </Button>
+                ))}
               </div>
             ) : (
               <Empty>

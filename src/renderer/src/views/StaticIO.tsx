@@ -7,6 +7,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { PageBar, ScrollPage } from '../components/Page'
 import { useInterval } from '../components/useInterval'
+import { follow, isHardware, pushDio, useHwLive } from '../hwsync'
 import { useStore } from '../store'
 
 type Widget = 'LED' | 'Button' | 'Switch'
@@ -20,11 +21,28 @@ interface IOState {
   loMode: Mode
   hiMode: Mode
   hi: number
+  /** The DIO button held down, if any. */
+  pressed: number | null
   set: (p: Partial<Omit<IOState, 'set'>>) => void
 }
 
 const initial = { widgets: ['LED', 'LED', 'LED', 'LED', 'Button', 'Button', 'Switch', 'Switch'] as Widget[], switches: Array(8).fill(false) as boolean[], drive: 'Push-Pull', loMode: 'Bit I/O' as Mode, hiMode: 'Slider' as Mode, hi: 0x5a }
-const useIO = create<IOState>()(persist((set) => ({ ...initial, set: (p) => set(p) }), { name: 'oscillo.static-io', partialize: ({ set: _s, ...r }) => r }))
+const useIO = create<IOState>()(persist((set) => ({ ...initial, pressed: null, set: (p) => set(p) }), { name: 'oscillo.static-io', partialize: ({ set: _s, pressed: _p, ...r }) => r }))
+
+/** Output enables and levels: DIO 15–8 always drive; DIO 7–0 drive where the widget is a switch or button. */
+function outputs(s: IOState): { mask: number; value: number } {
+  let mask = 0xff00
+  let value = (s.hi & 0xff) << 8
+  s.widgets.forEach((w, i) => {
+    if (w === 'LED') return
+    mask |= 1 << i
+    if (w === 'Switch' ? s.switches[i] : s.pressed === i) value |= 1 << i
+  })
+  return { mask, value }
+}
+
+// Real hardware follows the switches, buttons and the DIO 15–8 value.
+follow([useIO], () => outputs(useIO.getState()), ({ mask, value }) => pushDio(mask, value), 'Static I/O')
 
 // Segments a–g as [left, top, width, height] in a 36 × 60 cell.
 const SEG: [number, number, number, number][] = [
@@ -58,12 +76,15 @@ export function StaticIO() {
   const s = useIO()
   const app = useStore()
   const live = app.running && !!app.device
-  const [pressed, setPressed] = useState<number | null>(null)
+  const pressed = s.pressed
+  const setPressed = (pressed: number | null) => s.set({ pressed })
+  const dio = useHwLive((h) => h.dio)
+  const real = isHardware()
   const [t, setT] = useState(0)
   useInterval(() => setT((x) => x + 1), 250, live)
 
-  // Inputs: the LED pins read a slow counter from the board under test.
-  const inputs = (t >> 2) & 0xff
+  // Inputs: the device's pin levels on real hardware; on the Demo Device, a slow counter.
+  const inputs = real ? (dio ?? 0) & 0xff : (t >> 2) & 0xff
   const level = (i: number) => {
     const w = s.widgets[i]
     if (w === 'LED') return live ? (inputs >> i) & 1 : 0

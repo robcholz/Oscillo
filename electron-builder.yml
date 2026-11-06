@@ -4,6 +4,9 @@ productName: Oscillo
 copyright: Copyright © 2026 Finn Sheng
 directories:
   buildResources: build
+# koffi loads a native .node file, which cannot run from inside the asar archive.
+asarUnpack:
+  - node_modules/koffi/**
 files:
   - out/**/*
   - package.json
@@ -12,5 +15,17 @@ mac:
   target: dmg
   electronLanguages: [en]
   identity: null
+  # The WaveForms SDK, so Oscillo runs on Macs without WaveForms installed (see libs/dwf/macos).
+  extraFiles:
+    - from: libs/dwf/macos/dwf.framework
+      to: Frameworks/dwf.framework
+# Double-clicking a workspace or project in Finder opens it in Oscillo.
+fileAssociations:
+  - ext: oscillo
+    name: Oscillo Workspace
+    role: Editor
+  - ext: oscproj
+    name: Oscillo Project
+    role: Editor
 dmg:
   artifactName: Oscillo-${version}.${ext}

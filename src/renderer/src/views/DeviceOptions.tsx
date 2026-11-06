@@ -1,14 +1,14 @@
 // Device Options (board: DeviceOptions). Power, clocking, digital I/O and trigger settings for the
 // connected device, plus a live system monitor.
-import { Button, Fieldset, Select, Slider, Switch, Table, Toggle } from '@robcholz/geist'
+import { Button, Fieldset, Note, Select, Slider, Switch, Table, Toggle } from '@robcholz/geist'
 import { RefreshCw } from 'lucide-react'
-import { useState } from 'react'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { OptionRow, PageBar, ScrollPage } from '../components/Page'
 import { UnitInput } from '../components/UnitInput'
-import { jitter, useInterval } from '../components/useInterval'
-import { devices } from '../devices'
+import type { OptionsReply, OptionsRequest } from '../../../shared/hw'
+import { hw, useDevice, useHardware } from '../devices'
+import { follow, useHwLive } from '../hwsync'
 import { useStore } from '../store'
 
 const DEFAULTS = {
@@ -17,12 +17,11 @@ const DEFAULTS = {
   usbLimit: 0.5,
   led: 60,
   audio: false,
-  relay: false,
   sysFreq: 100e6,
   refClock: 'Internal',
   refFreq: 10e6,
   drive: '8 mA',
-  slew: 'Fast' as 'Fast' | 'Medium' | 'Slow',
+  slew: 'Fast' as 'Fast' | 'Slow' | 'Quiet',
   pull: 'None',
   threshold: 1.5,
   level: '3.3 V' as '3.3 V' | '1.8 V' | '2.5 V',
@@ -32,24 +31,67 @@ const DEFAULTS = {
   ]
 }
 type Opts = typeof DEFAULTS
-const useOpts = create<Opts & { set: (p: Partial<Opts>) => void }>()(persist((set) => ({ ...DEFAULTS, set: (p) => set(p) }), { name: 'oscillo.device-options', partialize: ({ set: _s, ...r }) => r }))
+const useOpts = create<Opts & { set: (p: Partial<Opts>) => void }>()(
+  persist((set) => ({ ...DEFAULTS, set: (p) => set(p) }), {
+    name: 'oscillo.device-options',
+    version: 2,
+    migrate: (x) => {
+      const o = { ...DEFAULTS, ...(x as Partial<Opts>) }
+      if (!['Fast', 'Slow', 'Quiet'].includes(o.slew)) o.slew = 'Fast'
+      if (!['None', 'Pull Up', 'Pull Down'].includes(o.pull)) o.pull = 'None'
+      return o
+    },
+    partialize: ({ set: _s, ...r }) => r
+  })
+)
+
+/** What the open device took from the last push. */
+const useApplied = create<OptionsReply | null>()(() => null)
+
+const toRequest = (o: Opts): OptionsRequest => ({
+  onClose: o.onClose === 'continue' ? 0 : o.onClose === 'stop' ? 1 : 2,
+  keepUsb: o.keepUsb,
+  usbLimit: o.usbLimit,
+  led: o.led,
+  audio: o.audio,
+  sysFreq: o.sysFreq,
+  clockMode: o.refClock === 'Internal' ? 0 : o.refClock === 'External In' ? 2 : 1,
+  refFreq: o.refFreq,
+  digitalVolts: parseFloat(o.level),
+  threshold: o.threshold,
+  driveMa: parseFloat(o.drive),
+  slew: o.slew === 'Fast' ? 2 : o.slew === 'Slow' ? 1 : 0,
+  pull: o.pull === 'Pull Up' ? 'Up' : o.pull === 'Pull Down' ? 'Down' : 'None',
+  // TRIGSRC 4 is the scope's trigger; 0 leaves the pin as an input.
+  triggers: o.trig.map((t) => (t.m === 'Output' ? 4 : 0))
+})
+
+// Pushed whenever an option changes and after connecting, on real hardware.
+follow(
+  [useOpts],
+  () => toRequest(useOpts.getState()),
+  async (r) => {
+    useApplied.setState(await hw!.options(r), true)
+  },
+  'device options'
+)
 
 const W = 'w-[180px]'
 
 export function DeviceOptions() {
   const o = useOpts()
   const app = useStore()
-  const dev = app.device ? devices[app.device] : null
-  const pro = !!dev?.name.includes('Pro')
-  const [mon, setMon] = useState(0)
-  useInterval(() => setMon((m) => m + 1), 1500, !!app.device)
+  const dev = useDevice()
+  const mon = useHwLive((h) => h.monitor)
+  const real = useHardware()
+  const applied = useApplied()
+  const fmt = (v: number | undefined, f: (x: number) => string) => (v === undefined || !Number.isFinite(v) ? 'Not reported' : f(v))
 
   const readings = app.device
     ? [
-        { k: 'USB Voltage', v: (5.04 + jitter(0.01)).toFixed(2) + ' V' },
-        { k: 'USB Current', v: Math.round(222 + jitter(6)) + ' mA' },
-        { k: 'AUX Voltage', v: '0.00 V' },
-        { k: 'Temperature', v: (41.2 + jitter(0.2) + (mon % 40) * 0.01).toFixed(1) + ' °C' }
+        { k: 'USB Voltage', v: fmt(mon?.usb.volts, (x) => x.toFixed(2) + ' V') },
+        { k: 'USB Current', v: fmt(mon?.usb.amps, (x) => Math.round(x * 1000) + ' mA') },
+        { k: 'Temperature', v: fmt(mon?.temperature, (x) => x.toFixed(1) + ' °C') }
       ]
     : [{ k: 'Device', v: 'Not connected' }]
 
@@ -64,6 +106,14 @@ export function DeviceOptions() {
         </PageBar>
       }
     >
+      {app.device && !real && (
+        <Note size="small">The Demo Device has none of these options. They are kept and applied when you connect real hardware.</Note>
+      )}
+      {real && applied && applied.unsupported.length > 0 && (
+        <Note size="small">
+          {dev?.name} does not have {applied.unsupported.join(', ')}. Those settings are kept but have no effect on it.
+        </Note>
+      )}
       <Fieldset title="Power and Behavior" subtitle="What the device does with power, LEDs and outputs." titleSize={16} bodyClassName="gap-0">
         <OptionRow label="On Close" description="What the device does when Oscillo closes.">
           <Switch aria-label="On Close" value={o.onClose} options={[{ label: 'Keep Running', value: 'continue' }, { label: 'Stop Outputs', value: 'stop' }, { label: 'Shut Down', value: 'shutdown' }] as const} onChange={(onClose) => o.set({ onClose })} />
@@ -83,9 +133,6 @@ export function DeviceOptions() {
         </OptionRow>
         <OptionRow label="Audio Output" description="Send Wavegen channel 1 to the audio jack.">
           <Toggle checked={o.audio} aria-label="Audio Output" onChange={(audio) => o.set({ audio })} />
-        </OptionRow>
-        <OptionRow label="Wavegen Output Relay" description="Disconnect Wavegen outputs when idle. Analog Discovery Pro only.">
-          <Toggle checked={o.relay} aria-label="Wavegen Output Relay" disabled={!pro} onChange={(relay) => o.set({ relay })} />
         </OptionRow>
       </Fieldset>
 
@@ -114,11 +161,11 @@ export function DeviceOptions() {
           </div>
         </OptionRow>
         <OptionRow label="Slew" description="Edge rate of digital outputs.">
-          <Switch aria-label="Slew" value={o.slew} options={['Fast', 'Medium', 'Slow'] as const} onChange={(slew) => o.set({ slew })} />
+          <Switch aria-label="Slew" value={o.slew} options={['Fast', 'Slow', 'Quiet'] as const} onChange={(slew) => o.set({ slew })} />
         </OptionRow>
         <OptionRow label="Pull" description="Resistor applied to inputs that are not driven.">
           <div className={W}>
-            <Select size="small" aria-label="Pull" value={o.pull} options={['None', 'Pull Up', 'Pull Down', 'Keeper']} onValueChange={(pull) => o.set({ pull })} />
+            <Select size="small" aria-label="Pull" value={o.pull} options={['None', 'Pull Up', 'Pull Down']} onValueChange={(pull) => o.set({ pull })} />
           </div>
         </OptionRow>
         <OptionRow label="Input Threshold" description="Voltage where an input reads high.">
@@ -145,7 +192,7 @@ export function DeviceOptions() {
         <Table compact caption="Trigger pins" columns={[{ key: 'p', title: 'Pin' }, { key: 'm', title: 'Mode' }, { key: 's', title: 'Source' }]} rows={o.trig} />
       </Fieldset>
 
-      <Fieldset title="System Monitor" subtitle="Live readings from the device, every 1.5 seconds." titleSize={16}>
+      <Fieldset title="System Monitor" subtitle="Live readings from the device, twice a second." titleSize={16}>
         <Table compact caption="System monitor" columns={[{ key: 'k', title: 'Reading' }, { key: 'v', title: 'Value', align: 'right' }]} rows={readings} />
       </Fieldset>
     </ScrollPage>

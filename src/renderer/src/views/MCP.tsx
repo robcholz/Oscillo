@@ -10,8 +10,9 @@ import { ChatGPTIcon, ClaudeCodeIcon, ClaudeIcon, CodexIcon } from '../component
 import { Grid2, PageBar, PanelSection, SplitPage } from '../components/Page'
 import { UnitInput } from '../components/UnitInput'
 import { useInterval } from '../components/useInterval'
+import { saveText } from '../files'
 import { useStore } from '../store'
-import { CLIENTS, REQUESTS, TOOL_GROUPS, useMcp, type AuditRow, type ClientId, type Perm, type Result } from './mcp-store'
+import { CLIENTS, TOOL_GROUPS, useMcp, type AuditRow, type ClientId, type Perm, type Result } from './mcp-store'
 
 const ICONS: Record<ClientId, ComponentType<{ size?: number }>> = { desktop: ClaudeIcon, code: ClaudeCodeIcon, codex: CodexIcon, chatgpt: ChatGPTIcon }
 const RESULT: Record<Result, BadgeVariant> = { Pending: 'amber-subtle', Allowed: 'green-subtle', Denied: 'red-subtle', Error: 'red-subtle' }
@@ -23,8 +24,6 @@ const RESOURCES = [
   { uri: 'oscillo://logic/last-capture', desc: 'Most recent logic capture with decoded frames.', type: 'JSON' }
 ]
 const SHOWN = 10
-// Clients connected a while before the app opened.
-const since: Record<ClientId, number> = { desktop: Date.now() - 12 * 60e3, code: 0, codex: Date.now() - 38 * 60e3, chatgpt: Date.now() - 3 * 60e3 }
 
 const ago = (t: number): string => {
   const m = Math.round((Date.now() - t) / 60e3)
@@ -48,12 +47,6 @@ function Json({ data }: { data: Record<string, unknown> }) {
   )
 }
 
-function download(name: string, text: string): void {
-  const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }))
-  const a = Object.assign(document.createElement('a'), { href: url, download: name })
-  a.click()
-  setTimeout(() => URL.revokeObjectURL(url), 1000)
-}
 
 export function MCP() {
   const m = useMcp()
@@ -66,7 +59,13 @@ export function MCP() {
   const [, tick] = useState(0)
   useInterval(() => tick((x) => x + 1), 30e3, true)
 
-  const cur = m.on && m.req >= 0 ? REQUESTS[m.req] : null
+  const cur = m.on ? (m.requests[0] ?? null) : null
+  const st = m.status
+  const httpSetup = `claude mcp add --transport http oscillo ${st?.url ?? `http://127.0.0.1:${m.port}/mcp`} --header "Authorization: Bearer ${m.token}"`
+  const stdioSetup = st?.stdio ?? 'Oscillo --mcp-stdio'
+  // Connected: a session that made a request in the last 10 minutes.
+  const sessionOf = (id: ClientId) => (st?.sessions ?? []).filter((x) => x.id === id && Date.now() - x.last < 10 * 60e3).sort((a, b) => a.since - b.since)[0]
+  const others = (st?.sessions ?? []).filter((x) => !x.id && Date.now() - x.last < 10 * 60e3)
   const rows = more ? m.rows : m.rows.slice(0, SHOWN)
   const copy = (text: string, what: string): void => {
     void navigator.clipboard?.writeText(text)
@@ -90,7 +89,10 @@ export function MCP() {
   const panel = (
     <>
       <PanelSection title="Transport" actions={<Switch aria-label="Transport" value={m.transport} options={['stdio', 'HTTP']} onChange={(transport) => m.set({ transport })} />}>
-        <Snippet text={m.transport === 'HTTP' ? `oscillo --mcp --http --port ${m.port}` : 'oscillo --mcp --stdio'} onCopy={() => toast('Copied to clipboard')} />
+        <Snippet text={m.transport === 'HTTP' ? httpSetup : stdioSetup} onCopy={() => toast('Copied to clipboard')} />
+        <Note type="secondary" size="small">
+          {m.transport === 'HTTP' ? 'Run this to add Oscillo to Claude Code. Other HTTP clients use the same URL and token.' : 'Add this command as a stdio server in Claude Desktop or Codex. It connects to Oscillo while it is open.'}
+        </Note>
         {m.transport === 'HTTP' && (
           <>
             <Grid2>
@@ -167,7 +169,7 @@ export function MCP() {
           titleSize={16}
           title="Approval Needed"
           subtitle={cur.text}
-          footer={`Requested by ${cur.c}`}
+          footer={`Requested by ${cur.client}${m.requests.length > 1 ? ` · ${m.requests.length - 1} more waiting` : ''}`}
           actions={
             <>
               <Button type="secondary" size="small" onClick={() => m.resolve(false)}>
@@ -191,12 +193,18 @@ export function MCP() {
           type="secondary"
           size="small"
           action={
-            <Button type="secondary" size="small" onClick={m.simulate}>
-              {m.on ? 'Simulate Request' : 'Start Server'}
-            </Button>
+            m.on ? (
+              <Button type="secondary" size="small" prefix={<Copy size={16} />} onClick={() => copy(m.transport === 'HTTP' ? httpSetup : stdioSetup, 'setup command')}>
+                Copy Setup
+              </Button>
+            ) : (
+              <Button type="secondary" size="small" onClick={() => m.set({ on: true })}>
+                Start Server
+              </Button>
+            )
           }
         >
-          {m.on ? 'No requests are waiting for approval.' : 'The server is stopped. Turn it on to accept client requests.'}
+          {m.on ? (st?.listening ? `No requests are waiting for approval. Listening on ${st.url}.` : (st?.error ?? 'Starting the server…')) : 'The server is stopped. Turn it on to accept client requests.'}
         </Note>
       )}
 
@@ -208,16 +216,16 @@ export function MCP() {
           <Material className="overflow-hidden [&>*:last-child]:shadow-none">
             {CLIENTS.map((c) => {
               const Icon = ICONS[c.id]
-              const on = m.on && m.clients[c.id]
+              const sess = m.on && m.clients[c.id] ? sessionOf(c.id) : undefined
               return (
                 <Entity key={c.id} icon={<Icon size={16} />} title={c.name} description={`${c.via} · ${m.perms[c.id]}`}>
-                  {on ? (
-                    <span className="text-[13px] tabular-nums text-gray-900" title={new Date(since[c.id]).toLocaleString()}>
-                      Connected {ago(since[c.id])}
+                  {sess ? (
+                    <span className="text-[13px] tabular-nums text-gray-900" title={new Date(sess.since).toLocaleString()}>
+                      Connected {ago(sess.since)}
                     </span>
                   ) : (
                     <Badge variant="gray-subtle" size="sm">
-                      Disconnected
+                      {m.clients[c.id] ? 'Not Connected' : 'Blocked'}
                     </Badge>
                   )}
                   <DotsMenu
@@ -242,8 +250,8 @@ export function MCP() {
                             danger
                             prefix={<Power size={16} />}
                             onSelect={() => {
-                              m.set({ clients: { ...m.clients, [c.id]: false } })
-                              toast(`${c.name} disconnected`)
+                              m.disconnect(c.id)
+                              toast(`${c.name} disconnected`, { detail: 'It cannot reconnect until you allow it.' })
                             }}
                           >
                             Disconnect Client
@@ -252,7 +260,6 @@ export function MCP() {
                           <MenuItem
                             prefix={<Plug size={16} />}
                             onSelect={() => {
-                              since[c.id] = Date.now()
                               m.set({ clients: { ...m.clients, [c.id]: true } })
                               toast(`${c.name} can reconnect`)
                             }}
@@ -266,6 +273,13 @@ export function MCP() {
                 </Entity>
               )
             })}
+            {others.map((o) => (
+              <Entity key={o.client + o.since} icon={<Plug size={16} />} title={o.client} description={`HTTP · ${m.perm}`}>
+                <span className="text-[13px] tabular-nums text-gray-900" title={new Date(o.since).toLocaleString()}>
+                  Connected {ago(o.since)}
+                </span>
+              </Entity>
+            ))}
           </Material>
 
           <div className="flex items-center justify-between">
@@ -292,7 +306,7 @@ export function MCP() {
               }
             ]}
             rows={rows}
-            rowKey={(r, i) => r.t + r.tool + i}
+            rowKey={(r) => r.id}
           />
           {m.rows.length > SHOWN && (
             <div className="flex justify-center">
@@ -369,9 +383,8 @@ export function MCP() {
         ]}
         onSubmit={(v) => {
           const text = v.f === 'CSV' ? ['time,client,tool,result', ...m.rows.map((r) => [r.t, r.c, r.tool, r.r].join(','))].join('\n') : m.rows.map((r) => JSON.stringify(r)).join('\n')
-          download(v.n, text)
           setExportOpen(false)
-          toast(`Exported ${v.n}`, { detail: `${m.rows.length} entries` })
+          void saveText(v.n, text, [{ name: v.f, extensions: [v.f === 'CSV' ? 'csv' : 'jsonl'] }])
         }}
       />
 

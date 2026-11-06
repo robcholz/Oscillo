@@ -1,12 +1,13 @@
 // Voltmeter (board: Voltmeter). DC, AC RMS and true RMS for each scope channel.
 import { Button, Material, Note, Select, StatusDot } from '@robcholz/geist'
 import { Hand, Play, Square } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { PageBar, ScrollPage } from '../components/Page'
 import { fixed } from '../components/format'
 import { useInterval } from '../components/useInterval'
+import { wantMeters } from '../hwsync'
 import { useStore } from '../store'
 import { readChannel, type Reading } from './meters'
 
@@ -35,6 +36,7 @@ export function Voltmeter() {
   const [hold, setHold] = useState(false)
   const [r, setR] = useState<[Reading, Reading]>([ZERO, ZERO])
   const live = vm.running && app.running && !!app.device && !hold
+  useEffect(() => wantMeters(live), [live])
   useInterval(() => setR([readChannel(0), readChannel(1)]), 400, live)
 
   const run = () => {

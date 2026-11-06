@@ -16,9 +16,67 @@ import { Plot, type Series } from '../components/Plot'
 import { UnitInput } from '../components/UnitInput'
 import { histogram, spectrum } from '../sim/dsp'
 import { check } from '../sim/expr'
-import { capture, measure, reference, type Capture, type Stats } from '../sim/scope'
+import { capture, fromSamples, measure, reference, stats as recordStats, type Capture, type Stats } from '../sim/scope'
+import { hw, useHardware } from '../devices'
 import { useStore } from '../store'
+import { openTable, publish, saveImage, saveTable, type Table as DataTable } from '../files'
+import { toggleLoggingFor, useLoggingOf } from '../logging'
 import { useScope, type ChannelId } from './scope-store'
+
+/** Listen: loops the latest capture of one channel through the speakers, at its sample rate. */
+let audio: { ctx: AudioContext; gain: GainNode; src: AudioBufferSourceNode | null } | null = null
+function play(v: ArrayLike<number>, rate: number, fullScale: number, vol: number): void {
+  // Browsers play 3 kS/s to 768 kS/s; other rates are resampled to the nearest end.
+  const out = Math.min(768000, Math.max(3000, rate))
+  const n = Math.max(1, Math.round((v.length * out) / rate))
+  audio ??= (() => {
+    const ctx = new AudioContext()
+    const gain = ctx.createGain()
+    gain.connect(ctx.destination)
+    return { ctx, gain, src: null }
+  })()
+  const buf = audio.ctx.createBuffer(1, n, out)
+  const d = buf.getChannelData(0)
+  for (let i = 0; i < n; i++) d[i] = Math.max(-1, Math.min(1, v[Math.min(v.length - 1, Math.floor((i * rate) / out))] / fullScale))
+  audio.gain.gain.value = vol / 100
+  const src = audio.ctx.createBufferSource()
+  src.buffer = buf
+  src.loop = true
+  src.connect(audio.gain)
+  src.start()
+  audio.src?.stop()
+  audio.src = src
+}
+function silence(): void {
+  audio?.src?.stop()
+  if (audio) audio.src = null
+}
+
+/** Sample Mode → the SDK's filter. */
+const FILTER: Record<string, number> = { Decimate: 0, Average: 1, 'Min/Max': 2 }
+
+/** R1: a stored trace, kept while the app runs. */
+interface Ref {
+  t: Float64Array
+  v: Float64Array
+  label: string
+}
+let savedRef: Ref | null = null
+
+/** The reference resampled onto the shown time axis (zero outside it). */
+function onAxis(r: Ref, t: Float64Array): Float64Array {
+  const out = new Float64Array(t.length)
+  let j = 0
+  for (let i = 0; i < t.length; i++) {
+    while (j < r.t.length - 2 && r.t[j + 1] < t[i]) j++
+    const a = r.t[j]
+    const b = r.t[j + 1] ?? a
+    if (t[i] < r.t[0] || t[i] > r.t[r.t.length - 1]) continue
+    const k = b === a ? 0 : (t[i] - a) / (b - a)
+    out[i] = r.v[j] + ((r.v[j + 1] ?? r.v[j]) - r.v[j]) * Math.min(1, Math.max(0, k))
+  }
+  return out
+}
 
 const COLOR: Record<ChannelId, string> = { C1: 'var(--wf-c1)', C2: 'var(--wf-c2)', M1: 'var(--wf-c3)', R1: 'var(--gray-700)' }
 const TABS = ['Time', 'XY', 'FFT', 'Histogram', 'Persistence', 'Data', 'Notes'] as const
@@ -66,7 +124,12 @@ export function Scope() {
   const [history, setHistory] = useState<Capture[]>([])
   const [capIndex, setCapIndex] = useState(0)
   const [armed, setArmed] = useState(false)
-  const [logging, setLogging] = useState(false)
+  const logging = useLoggingOf('Oscilloscope')
+  const [ref, setRefState] = useState<Ref | null>(savedRef)
+  const setRef = (r: Ref | null) => {
+    savedRef = r
+    setRefState(r)
+  }
   const [dialog, setDialog] = useState<Dialog>(null)
   const stats = useRef<Record<string, Acc>>({})
   const [, bump] = useState(0)
@@ -74,14 +137,90 @@ export function Scope() {
   // Visible window, zoomed around the trigger position.
   const view = useMemo(() => ({ ...cfg, base: cfg.base / s.zoom }), [cfg, s.zoom])
 
+  const real = useHardware()
+  const inflight = useRef(false)
+  // A real device: one capture of both channels across the visible window, at the record length set.
+  const acquireHardware = async (): Promise<Capture | null> => {
+    if (!hw || inflight.current) return null
+    inflight.current = true
+    try {
+      const span = view.base * 10
+      const n = Math.max(16, Math.min(32768, s.samples))
+      const chans = (['C1', 'C2'] as const).map((c, i) => (cfg.ch[c].on ? i : -1)).filter((i) => i >= 0)
+      if (!chans.length) return null
+      const src = cfg.triggerSource === 'Channel 2' ? 1 : 0
+      const r = await hw.scope({
+        channels: chans,
+        rate: n / span,
+        samples: n,
+        // A 10x probe divides the signal by 10 before the input: range and offset at the input, volts at the tip.
+        range: { 0: (cfg.ch.C1.range * 10) / cfg.ch.C1.probe, 1: (cfg.ch.C2.range * 10) / cfg.ch.C2.probe },
+        offset: { 0: -cfg.ch.C1.offset / cfg.ch.C1.probe, 1: -cfg.ch.C2.offset / cfg.ch.C2.probe },
+        filter: { 0: FILTER[s.sampleMode.C1] ?? 1, 1: FILTER[s.sampleMode.C2] ?? 1 },
+        trigger:
+          cfg.triggerMode === 'None'
+            ? undefined
+            : {
+                channel: src,
+                level: cfg.level / cfg.ch[src ? 'C2' : 'C1'].probe,
+                slope: cfg.condition === 'Falling' ? 'Fall' : cfg.condition === 'Either' ? 'Either' : 'Rise',
+                position: cfg.position,
+                autoTimeout: cfg.triggerMode === 'Auto' ? 0.25 : 0,
+                // TRIGSRC numbers from dwf.h; the channels use the scope's own detector.
+                source: { 'External 1': 11, 'External 2': 12, 'Wavegen 1': 7, Logic: 5 }[cfg.triggerSource],
+                type: s.triggerType === 'Pulse' ? 1 : s.triggerType === 'Transition' ? 2 : 0,
+                holdoff: Number(s.holdoff) || 0,
+                hysteresis: s.hysteresis === 'Auto' ? undefined : Number(s.hysteresis) / cfg.ch[src ? 'C2' : 'C1'].probe,
+                filter: FILTER[s.filter],
+                lengthCondition: s.lengthCond === 'Timeout' ? 1 : s.lengthCond === 'More' ? 2 : 0,
+                length: Number(s.length) * 1e-6
+              }
+      })
+      const pick = (i: number): Float64Array | null => {
+        const v = chans.includes(i) ? r.data[chans.indexOf(i)] : null
+        const k = cfg.ch[i ? 'C2' : 'C1'].probe
+        if (v && k !== 1) for (let j = 0; j < v.length; j++) v[j] *= k
+        // AC coupling on devices without a coupling switch: the mean of the capture is removed.
+        if (v && cfg.ch[i ? 'C2' : 'C1'].coupling === 'AC') {
+          const m = v.reduce((a, b) => a + b, 0) / v.length
+          for (let k = 0; k < v.length; k++) v[k] -= m
+        }
+        return v
+      }
+      return fromSamples(cfg, r.rate, pick(0), pick(1))
+    } catch (e) {
+      s.set({ running: false })
+      toast('Capture failed', { detail: (e as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') })
+      return null
+    } finally {
+      inflight.current = false
+    }
+  }
+
   const acquire = (): void => {
-    const c = capture(view)
+    if (real) {
+      void acquireHardware().then((c) => c && record(c, (ch) => recordStats(c.t, c[ch])))
+      return
+    }
+    record(capture(view), (ch) => measure(ch, cfg))
+  }
+  const record = (c: Capture, measureCh: (ch: 'C1' | 'C2' | 'M1') => Stats): void => {
+    for (const ch of ['C1', 'C2'] as const) {
+      const z = s.zero?.[ch] ?? 0
+      if (z) for (let i = 0; i < c[ch].length; i++) c[ch][i] -= z
+    }
     setCap(c)
+    publish('Oscilloscope', {
+      columns: ['Time (s)', `${s.names.C1} (V)`, `${s.names.C2} (V)`, ...(s.show.M1 ? ['M1'] : [])],
+      data: [c.t, c.C1, c.C2, ...(s.show.M1 ? [c.M1] : [])],
+      triggered: c.triggered,
+      meta: { 'Time Base': `${si(cfg.base, 's')}/div`, Trigger: `${cfg.triggerSource} ${cfg.condition} ${cfg.level} V`, Rate: si(c.t.length > 1 ? 1 / (c.t[1] - c.t[0]) : 0, 'S/s') }
+    })
     setHistory((h) => [...h.slice(-(s.history - 1)), c])
     setCapIndex(0)
     for (const m of s.measurements) {
       if (m.ch === 'R1') continue
-      const st = measure(m.ch as 'C1' | 'C2' | 'M1', cfg)
+      const st = measureCh(m.ch as 'C1' | 'C2' | 'M1')
       const v = pick(st, m.m).v
       const k = m.ch + m.m
       const a = stats.current[k] ?? { min: Infinity, max: -Infinity, sum: 0, n: 0, last: v }
@@ -99,12 +238,23 @@ export function Scope() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [live, s.updateMs, view, s.measurements])
   useEffect(() => {
-    if (!live) setCap(capture(view, 2000, 0.13))
+    if (!live && !real) setCap(capture(view, 2000, 0.13))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view])
 
+  useEffect(() => {
+    if (!s.audio.on) return silence()
+    const ch = s.audio.src === 'Channel 2' ? 'C2' : s.audio.src === 'M1' ? 'M1' : 'C1'
+    const t = cap.t
+    if (t.length < 2) return
+    const range = cfg.ch[ch === 'C2' ? 'C2' : 'C1'].range * 5
+    play(cap[ch], 1 / (t[1] - t[0]), range, s.audio.vol)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cap, s.audio.on, s.audio.src, s.audio.vol])
+  useEffect(() => () => silence(), [])
+
   const shown = capIndex > 0 && history.length ? history[history.length - capIndex] ?? cap : cap
-  const r1 = useMemo(() => reference(shown.t), [shown.t])
+  const r1 = useMemo(() => (ref ? onAxis(ref, shown.t) : real ? new Float64Array(shown.t.length) : reference(shown.t)), [shown.t, ref, real])
   const mathError = check(cfg.math, ['C1', 'C2', 'R1'])
 
   const toast = app.toast
@@ -183,21 +333,28 @@ export function Scope() {
   })
 
   const ask = (d: NonNullable<Dialog>): void => setDialog(d)
-  const exportData = (what: string): void =>
-    ask({
-      title: 'Export Data',
-      description: `Save the samples of ${what} from the current capture.`,
-      columns: 2,
-      fields: [
-        { key: 'name', label: 'File Name', value: 'scope_capture', required: true },
-        { key: 'fmt', label: 'Format', type: 'select', options: ['CSV', 'TSV', 'JSON Lines', 'MATLAB'] }
-      ],
-      submitLabel: 'Export',
-      onSubmit: (v) => toast('Data exported', { detail: `${v.name}.${v.fmt === 'CSV' ? 'csv' : v.fmt === 'TSV' ? 'tsv' : v.fmt === 'MATLAB' ? 'mat' : 'jsonl'}` })
-    })
-  const toggleLog = (): void => {
-    setLogging(!logging)
-    toast(logging ? 'Logging stopped' : 'Logging to scope_log.csv')
+  const table = (): DataTable => ({
+    columns: ['Time (s)', `${s.names.C1} (V)`, `${s.names.C2} (V)`, ...(s.show.M1 ? ['M1'] : [])],
+    data: [shown.t, shown.C1, shown.C2, ...(s.show.M1 ? [shown.M1] : [])],
+    at: Date.now(),
+    triggered: shown.triggered
+  })
+  const exportData = (c?: 'C1' | 'C2'): void => void saveTable(c ? `${s.names[c].toLowerCase().replace(/\s+/g, '-')}.csv` : 'scope.csv', table(), { only: c ? [`${s.names[c]} (V)`] : undefined, comments: { 'Time Base': `${si(cfg.base, 's')}/div` } })
+  const toggleLog = (): void => toggleLoggingFor('Oscilloscope')
+  const snapshot = (c: 'C1' | 'C2'): void => {
+    setRef({ t: shown.t.slice(), v: shown[c].slice(), label: `Snapshot of ${s.names[c]} at ${new Date().toLocaleTimeString()}` })
+    s.set({ show: { ...s.show, R1: true } })
+    toast(`R1 updated from ${s.names[c]}`)
+  }
+  const importRef = async (): Promise<void> => {
+    const f = await openTable()
+    if (!f) return
+    const col = f.data.length > 1 ? 1 : 0
+    const v = Float64Array.from(f.data[col])
+    const t = f.data.length > 1 ? Float64Array.from(f.data[0]) : Float64Array.from(v, (_, i) => (i - v.length / 2) * (shown.t[1] - shown.t[0]))
+    setRef({ t, v, label: `${f.name}, ${f.columns[col]}` })
+    s.set({ show: { ...s.show, R1: true } })
+    toast(`Imported ${f.name} into R1`, { detail: `${v.length.toLocaleString()} samples from ${f.columns[col]}. The first column is time in seconds.` })
   }
 
   const status = !app.device ? (
@@ -282,8 +439,8 @@ export function Scope() {
     if (tab === 'Time')
       return (
         <>
-          <Plot x={xAxis} y={yAxis} series={probeSeries.map((p, i) => ({ ...p, y: series[i].y }))} ariaLabel="Channel traces" overlay={overlay} />
-          {s.show.digital && <Digital t={shown.t} />}
+          <Plot x={xAxis} y={yAxis} series={probeSeries.map((p, i) => ({ ...p, y: series[i].y }))} ariaLabel="Channel traces" overlay={overlay} onView={(a, b) => { s.set({ zoom: Math.min(1000, Math.max(1, (cfg.base * 10) / (b - a))) }); s.setCfg({ position: (a + b) / 2 }) }} />
+          {s.show.digital && !real && <Digital t={shown.t} />}
         </>
       )
     if (tab === 'XY')
@@ -386,10 +543,10 @@ export function Scope() {
       <MenuItem prefix={<Pencil size={16} />} onSelect={() => ask({ title: 'Rename Channel', fields: [{ key: 'n', label: 'Name', value: s.names[c], required: true }], submitLabel: 'Rename', onSubmit: (v) => { s.set({ names: { ...s.names, [c]: v.n } }); toast(`${c} renamed to ${v.n}`) } })}>
         Rename Channel
       </MenuItem>
-      <MenuItem prefix={<Copy size={16} />} onSelect={() => { s.set({ show: { ...s.show, R1: true } }); toast(`R1 updated from ${s.names[c]}`) }}>
+      <MenuItem prefix={<Copy size={16} />} onSelect={() => snapshot(c)}>
         Copy as Reference
       </MenuItem>
-      <MenuItem prefix={<Download size={16} />} onSelect={() => exportData(s.names[c])}>
+      <MenuItem prefix={<Download size={16} />} onSelect={() => exportData(c)}>
         Export Data
       </MenuItem>
       <MenuSeparator />
@@ -418,13 +575,29 @@ export function Scope() {
       <Grid2>
         <UnitInput label="Offset" value={cfg.ch[c].offset} suffix="V" min={-25} max={25} onCommit={(v) => s.setCh(c, { offset: v })} />
         <UnitInput label="Range" value={cfg.ch[c].range} suffix="V/div" min={0.0005} max={10} onCommit={(v) => s.setCh(c, { range: v })} />
-        <LabeledSelect label="Probe" value={s.probe[c]} onValueChange={(v) => s.set({ probe: { ...s.probe, [c]: v } })} options={['1x', '10x', '100x', 'Custom']} />
+        <LabeledSelect label="Probe" value={`${cfg.ch[c].probe}x`} onValueChange={(v) => s.setCh(c, { probe: parseFloat(v) })} options={['1x', '10x', '100x']} />
         <LabeledSelect label="Sample Mode" value={s.sampleMode[c]} onValueChange={(v) => s.set({ sampleMode: { ...s.sampleMode, [c]: v } })} options={['Average', 'Decimate', 'Min/Max']} />
         <LabeledSelect label="Coupling" value={cfg.ch[c].coupling} onValueChange={(v) => s.setCh(c, { coupling: v as 'DC' | 'AC' })} options={['DC', 'AC']} />
-        <LabeledSelect label="Noise Band" value={s.noiseBand[c]} onValueChange={(v) => s.set({ noiseBand: { ...s.noiseBand, [c]: v } })} options={['Off', 'On']} />
       </Grid2>
-      <Button type="tertiary" size="small" prefix={<Ruler size={16} />} onClick={() => toast(`Offset compensation applied to ${s.names[c]}`)} className="self-start">
-        Zero Offset Compensation
+      <Button
+        type="tertiary"
+        size="small"
+        prefix={<Ruler size={16} />}
+        className="self-start"
+        onClick={() => {
+          const zero = s.zero ?? { C1: 0, C2: 0 }
+          if (zero[c]) {
+            s.set({ zero: { ...zero, [c]: 0 } })
+            return toast(`Zero offset cleared on ${s.names[c]}`)
+          }
+          // The input should be grounded: its mean now is the offset to remove.
+          const v = shown[c]
+          const m = v.reduce((a, b) => a + b, 0) / Math.max(1, v.length)
+          s.set({ zero: { ...zero, [c]: m } })
+          toast(`Zero offset set on ${s.names[c]}`, { detail: `${si(m, 'V')} is subtracted from every capture. Ground the input before you press this.` })
+        }}
+      >
+        {s.zero?.[c] ? `Clear Zero Offset (${si(s.zero[c], 'V')})` : 'Zero Offset'}
       </Button>
     </PanelSection>
   )
@@ -444,11 +617,11 @@ export function Scope() {
       </PanelSection>
       <PanelSection title="Trigger">
         <Grid2>
-          <LabeledSelect label="Source" value={cfg.triggerSource} onValueChange={(v) => s.setCfg({ triggerSource: v })} options={['Channel 1', 'Channel 2', 'External 1', 'External 2', 'Wavegen 1', 'Logic', 'Manual']} />
+          <LabeledSelect label="Source" value={cfg.triggerSource} onValueChange={(v) => s.setCfg({ triggerSource: v })} options={['Channel 1', 'Channel 2', 'External 1', 'External 2', 'Wavegen 1', 'Logic']} />
           <LabeledSelect label="Type" value={s.triggerType} onValueChange={(v) => s.set({ triggerType: v })} options={['Edge', 'Pulse', 'Transition']} />
           <LabeledSelect label="Condition" value={cfg.condition} onValueChange={(v) => s.setCfg({ condition: v as 'Rising' })} options={['Rising', 'Falling', 'Either']} />
           <UnitInput label="Level" value={cfg.level} suffix="V" min={-25} max={25} onCommit={(v) => s.setCfg({ level: v })} />
-          <LabeledSelect label="Hysteresis" value={s.hysteresis} onValueChange={(v) => s.set({ hysteresis: v })} options={['Auto', 'Manual']} />
+          <UnitInput label="Hysteresis (0 = Auto)" value={s.hysteresis === 'Auto' ? 0 : Number(s.hysteresis) || 0} suffix="V" min={0} max={5} onCommit={(v) => s.set({ hysteresis: v ? String(v) : 'Auto' })} />
           <UnitInput label="Holdoff" value={Number(s.holdoff)} suffix="s" min={0} onCommit={(v) => s.set({ holdoff: String(v) })} />
           {s.triggerType !== 'Edge' && (
             <>
@@ -489,20 +662,20 @@ export function Scope() {
               }
             />
           </Entity>
-          <Entity title="R1 · Reference" description="Snapshot of C1 at 12:01:44" icon={<Copy size={16} />}>
+          <Entity title="R1 · Reference" description={ref?.label ?? (real ? 'Empty. Copy a channel or import a CSV.' : 'Simulated snapshot of C1')} icon={<Copy size={16} />}>
             <Toggle checked={s.show.R1} onChange={(on) => s.set({ show: { ...s.show, R1: on } })} aria-label="Show R1" />
             <DotsMenu
               aria-label="R1 Actions"
               menu={
                 <>
-                  <MenuItem prefix={<RefreshCw size={16} />} onSelect={() => toast('R1 updated from Channel 1')}>
+                  <MenuItem prefix={<RefreshCw size={16} />} onSelect={() => snapshot('C1')}>
                     Update Snapshot
                   </MenuItem>
-                  <MenuItem prefix={<Upload size={16} />} onSelect={() => ask({ title: 'Import Reference', fields: [{ key: 'file', label: 'File', value: 'reference.csv', required: true }, { key: 'col', label: 'Column', type: 'select', options: ['1', '2', '3'] }], submitLabel: 'Import File', onSubmit: (v) => toast(`Imported ${v.file} into R1`) })}>
+                  <MenuItem prefix={<Upload size={16} />} onSelect={() => void importRef()}>
                     Import File
                   </MenuItem>
                   <MenuSeparator />
-                  <MenuItem danger prefix={<Trash2 size={16} />} onSelect={() => { s.set({ show: { ...s.show, R1: false } }); toast('R1 hidden') }}>
+                  <MenuItem danger prefix={<Trash2 size={16} />} onSelect={() => { setRef(null); s.set({ show: { ...s.show, R1: false } }); toast('R1 removed') }}>
                     Remove
                   </MenuItem>
                 </>
@@ -510,7 +683,7 @@ export function Scope() {
             />
           </Entity>
           <Entity title="Digital · DIO 0–1" description="Mixed signal from Logic, shared trigger" icon={<Binary size={16} />} className="shadow-none">
-            <Toggle checked={s.show.digital} onChange={(on) => s.set({ show: { ...s.show, digital: on } })} aria-label="Show Digital" />
+            <Toggle checked={s.show.digital && !real} disabled={real} onChange={(on) => s.set({ show: { ...s.show, digital: on } })} aria-label="Show Digital" />
           </Entity>
         </Material>
       </PanelSection>
@@ -564,8 +737,8 @@ export function Scope() {
                 <MenuContent align="end">
                   <MenuItem prefix={<Sigma size={16} />} onSelect={() => s.set({ show: { ...s.show, M1: true } })}>Math Channel</MenuItem>
                   <MenuItem prefix={<Copy size={16} />} onSelect={() => s.set({ show: { ...s.show, R1: true } })}>Reference Channel</MenuItem>
-                  <MenuItem prefix={<Binary size={16} />} onSelect={() => { s.set({ show: { ...s.show, digital: true } }); toast('Digital channels shown') }}>Digital Channels</MenuItem>
-                  <MenuItem prefix={<Upload size={16} />} onSelect={() => ask({ title: 'Import Channel', fields: [{ key: 'file', label: 'File', value: 'capture.csv', required: true }], submitLabel: 'Import File', onSubmit: (v) => { s.set({ show: { ...s.show, R1: true } }); toast(`Imported ${v.file} into R1`) } })}>Import File…</MenuItem>
+                  <MenuItem prefix={<Binary size={16} />} onSelect={() => { if (real) return toast('Digital channels are in the Logic Analyzer', { detail: 'This device captures them there, on their own time base.' }); s.set({ show: { ...s.show, digital: true } }); toast('Digital channels shown') }}>Digital Channels</MenuItem>
+                  <MenuItem prefix={<Upload size={16} />} onSelect={() => void importRef()}>Import File…</MenuItem>
                 </MenuContent>
               </MenuRoot>
             </div>
@@ -598,8 +771,8 @@ export function Scope() {
               aria-label="Plot Actions"
               menu={
                 <>
-                  <MenuItem prefix={<Download size={16} />} onSelect={() => exportData('all channels')}>Export Data</MenuItem>
-                  <MenuItem prefix={<Upload size={16} />} onSelect={() => toast('Plot image copied to clipboard')}>Export Image</MenuItem>
+                  <MenuItem prefix={<Download size={16} />} onSelect={() => exportData()}>Export Data</MenuItem>
+                  <MenuItem prefix={<Upload size={16} />} onSelect={() => void saveImage('scope.png')}>Export Image</MenuItem>
                   <MenuItem prefix={<ScrollText size={16} />} onSelect={toggleLog}>{logging ? 'Stop Logging' : 'Start Logging'}</MenuItem>
                   {s.plotLabels.length > 0 && <MenuItem prefix={<Trash2 size={16} />} onSelect={() => s.set({ plotLabels: [] })}>Clear Labels</MenuItem>}
                 </>

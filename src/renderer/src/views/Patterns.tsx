@@ -8,6 +8,10 @@ import { persist } from 'zustand/middleware'
 import { si } from '../components/format'
 import { PageBar, ScrollPage } from '../components/Page'
 import { parseSi } from '../components/UnitInput'
+import type { PatternRequest } from '../../../shared/hw'
+import { hw } from '../devices'
+import { follow } from '../hwsync'
+import { openTable } from '../files'
 import { useStore } from '../store'
 
 const TYPES = [
@@ -80,6 +84,52 @@ const usePatterns = create<PatternState>()(
     }),
     { name: 'oscillo.patterns', partialize: ({ set: _s, ...r }) => r }
   )
+)
+
+/** One period of each bit of a sequence, bit 0 first. */
+function seqBits(r: Row): number[][] {
+  const n = Math.max(1, r.width)
+  const type = r.type
+  const walk = (i: number) => 1 << (r.direction === 'Left' ? i : n - 1 - i)
+  let words: number[]
+  if (type === 'Binary Counter') words = Array.from({ length: 2 ** n }, (_, i) => i)
+  else if (type === 'Gray Counter') words = Array.from({ length: 2 ** n }, (_, i) => i ^ (i >> 1))
+  else if (type === 'Johnson Counter') words = Array.from({ length: 2 * n }, (_, i) => (i < n ? (1 << (i + 1)) - 1 : ((1 << n) - 1) & ~((1 << (i - n + 1)) - 1)))
+  else if (type === 'Walking 1') words = Array.from({ length: n }, (_, i) => walk(i))
+  else words = Array.from({ length: n }, (_, i) => ((1 << n) - 1) & ~walk(i))
+  return Array.from({ length: n }, (_, b) => words.map((w) => (w >> b) & 1))
+}
+
+const IDLE_MAP: Record<string, PatternRequest['idle']> = { Low: 'Low', High: 'High', Z: 'Z', Initial: 'Init' }
+
+/** What each pin plays on real hardware. */
+export function toPatterns(rows: Row[], bits: number[], rate: number): PatternRequest[] {
+  const out: PatternRequest[] = []
+  for (const r of rows) {
+    const idle = IDLE_MAP[r.idle] ?? 'Init'
+    if (r.type === 'Clock') out.push({ pin: r.pin, kind: 'Clock', frequency: r.freq, duty: r.duty, idle })
+    else if (r.type === 'Pulse') out.push({ pin: r.pin, kind: 'Pulse', frequency: 1 / Math.max(1e-9, r.low + r.high), duty: (100 * r.high) / Math.max(1e-12, r.low + r.high), idle })
+    else if (r.type === 'Random') out.push({ pin: r.pin, kind: 'Random', frequency: r.freq, idle })
+    else if (r.type === 'Constant') out.push({ pin: r.pin, kind: 'Constant', frequency: 1, data: [r.level], idle })
+    else if (r.type === 'Number') for (let b = 0; b < r.width; b++) out.push({ pin: r.pin + b, kind: 'Constant', frequency: 1, data: [(r.value >> b) & 1], idle })
+    else if (r.type === 'Custom') out.push({ pin: r.pin, kind: 'Custom', frequency: rate, data: bits, idle })
+    else if (SEQUENCES.has(r.type)) seqBits(r).forEach((data, b) => out.push({ pin: r.pin + b, kind: 'Custom', frequency: r.freq, data, idle }))
+  }
+  return out.filter((p) => p.pin >= 0 && p.pin < 32)
+}
+
+// Real hardware plays the rows while the generator runs.
+follow(
+  [usePatterns],
+  () => {
+    const { rows, bits, rate, running } = usePatterns.getState()
+    return { list: running && useStore.getState().running ? toPatterns(rows, bits, rate) : null }
+  },
+  async ({ list }) => {
+    if (list) await hw!.patterns(list)
+    else await hw!.patternsStop()
+  },
+  'the patterns'
 )
 
 const pinLabel = (r: Row) => (r.width > 1 ? `DIO ${r.pin}–${r.pin + r.width - 1}` : `DIO ${r.pin}`)
@@ -305,7 +355,14 @@ export function Patterns() {
         <Button type="tertiary" size="small" prefix={<Layers size={16} />} onClick={() => add('Binary Counter', 4)}>
           Add Bus
         </Button>
-        <Button type="tertiary" size="small" prefix={<Upload size={16} />} onClick={() => { setBits(Array.from({ length: 64 }, (_, i) => (i % 3 === 0 ? 1 : 0))); toast('Imported pattern.csv', { detail: '64 samples into the custom pattern.' }) }}>
+        <Button type="tertiary" size="small" prefix={<Upload size={16} />} onClick={async () => {
+          const f = await openTable()
+          if (!f) return
+          // The last column holds the samples, so a time column in front is skipped.
+          const col = f.data[f.data.length - 1].slice(0, 1024).map((v) => (v > 0.5 ? 1 : 0))
+          setBits(col)
+          toast(`Imported ${f.name}`, { detail: `${col.length} samples into the custom pattern. Values above 0.5 are high.` })
+        }}>
           Import CSV
         </Button>
         <Toggle checked={s.repeatTrigger} onChange={(repeatTrigger) => s.set({ repeatTrigger })}>

@@ -8,7 +8,7 @@ import {
   Activity, ArrowDown, ArrowUp, Binary, ChevronDown, ChevronLeft, ChevronRight, Crosshair, Download, Eye, FileCode, Layers, List, Maximize2, Pencil, Play, Plus,
   ScrollText, Search, Square, StepForward, Trash2, Upload, X, ZoomIn, ZoomOut
 } from 'lucide-react'
-import { useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { axisTicks, si } from '../components/format'
@@ -16,12 +16,56 @@ import { Grid2, LabeledSelect, PageBar, PanelSection, SplitPage } from '../compo
 import { UnitInput } from '../components/UnitInput'
 import { useInterval } from '../components/useInterval'
 import { capture, decodeBus, decodeSpi, decodeUart, DURATION, levelAt, pulseStats, type DigitalSignal, type Frame } from '../sim/logic'
+import type { LogicReply } from '../../../shared/hw'
+import { hw, useHardware } from '../devices'
+import { publish, saveImage, saveTable, saveText, type Table as DataTable } from '../files'
+import { toggleLoggingFor, useLoggingOf } from '../logging'
 import { useStore } from '../store'
 
 const TRIGGERS = ['Ignore', 'Low', 'High', 'Rising', 'Falling', 'Either Edge']
 const ROWS = { 'Compact Rows': 24, 'Default Rows': 32, 'Tall Rows': 44 } as const
 const TABS = ['Signals', 'Data', 'Notes'] as const
 const HISTORY = 16
+
+const pinOf = (io: string) => Number(/\d+/.exec(io)?.[0] ?? -1)
+
+/** Edge lists for each named signal from a real capture (bit n of each word is DIO n). */
+function toSignals(r: LogicReply, sigs: Sig[]): Record<string, DigitalSignal> {
+  const out: Record<string, DigitalSignal> = {}
+  for (const g of sigs) {
+    const pin = pinOf(g.io)
+    if (pin < 0) continue
+    const bit = (w: number) => ((w >> pin) & 1) as 0 | 1
+    const init = bit(r.data[0] ?? 0)
+    const edges: number[] = []
+    let level = init
+    for (let i = 1; i < r.data.length; i++) {
+      const b = bit(r.data[i])
+      if (b !== level) {
+        edges.push(i / r.rate)
+        level = b
+      }
+    }
+    out[g.id] = { init, edges }
+  }
+  return out
+}
+
+/** One row per edge with every signal's level, for Export and Logging. */
+function edgeTable(signals: Record<string, DigitalSignal>, sigs: Sig[]): DataTable {
+  const list = sigs.filter((g) => signals[g.id])
+  const times = [...new Set([0, ...list.flatMap((g) => signals[g.id].edges)])].sort((a, b) => a - b)
+  const data: number[][] = [times]
+  for (const g of list) {
+    const { init, edges } = signals[g.id]
+    let k = 0
+    data.push(times.map((t) => {
+      while (k < edges.length && edges[k] <= t) k++
+      return k % 2 ? 1 - init : init
+    }))
+  }
+  return { columns: ['Time (s)', ...list.map((g) => `${g.name} (${g.io})`)], data, at: Date.now() }
+}
 
 interface Sig {
   id: string
@@ -104,20 +148,65 @@ export function Logic() {
   const [labels, setLabels] = useState<{ t: number; text: string }[]>([])
   const [filter, setFilter] = useState('')
   const [probe, setProbe] = useState<number | null>(null)
-  const [logging, setLogging] = useState(false)
+  const logging = useLoggingOf('Logic Analyzer')
   const [more, setMore] = useState(false)
   const [dialog, setDialog] = useState<null | { title: string; fields: FormField[]; submitLabel: string; onSubmit: (v: Record<string, string>) => void }>(null)
   const live = s.running && app.running && !!app.device
   const toast = app.toast
 
+  const real = useHardware()
   // Live acquisition: a new capture every half second, keeping the last 16.
   useInterval(() => {
     setLatest((n) => n + 1)
     setCapIndex((i) => (i === latest ? latest + 1 : i))
-  }, 500, live && s.runMode !== 'Record')
+  }, 500, live && s.runMode !== 'Record' && !real)
+
+  // A real device: captures back to back at 100 MS/s, triggered by the signals' trigger settings.
+  const hwCaps = useRef(new Map<number, Record<string, DigitalSignal>>())
+  const latestRef = useRef(latest)
+  latestRef.current = latest
+  const [singleShot, setSingleShot] = useState(0)
+  const acquire = async (): Promise<boolean> => {
+    const st = useLogic.getState()
+    const rise = st.mode === 'None' ? [] : st.signals.filter((g) => g.trigger === 'Rising' || g.trigger === 'Either').map((g) => pinOf(g.io))
+    const fall = st.mode === 'None' ? [] : st.signals.filter((g) => g.trigger === 'Falling' || g.trigger === 'Either').map((g) => pinOf(g.io))
+    try {
+      const r = await hw!.logic({ rate: 100e6, samples: 16384, trigger: { rise, fall, position: st.time.triggerPos / 100, autoTimeout: st.mode === 'Auto' ? 0.5 : 4 } })
+      const k = Math.max(latestRef.current, ...hwCaps.current.keys()) + 1
+      hwCaps.current.set(k, toSignals(r, st.signals))
+      hwCaps.current.delete(k - HISTORY)
+      setLatest(k)
+      setCapIndex(k)
+      return true
+    } catch (e) {
+      const msg = (e as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
+      // Normal mode waits for a trigger; a timeout just means none came yet.
+      if (st.mode === 'Normal' && /timed out/.test(msg)) return true
+      toast('Capture failed', { detail: msg })
+      return false
+    }
+  }
+  useEffect(() => {
+    if (!real || !(live || singleShot)) return
+    let alive = true
+    void (async () => {
+      do {
+        if (!(await acquire())) break
+      } while (alive && live && useLogic.getState().runMode !== 'Record')
+      if (alive) setSingleShot(0)
+    })()
+    return () => {
+      alive = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [real, live, singleShot])
 
   const first = Math.max(1, latest - HISTORY + 1)
-  const cap = useMemo(() => capture(capIndex), [capIndex])
+  const cap = useMemo(() => (real ? { index: capIndex, signals: hwCaps.current.get(capIndex) ?? {} } : capture(capIndex)), [capIndex, real])
+  useEffect(() => {
+    if (Object.keys(cap.signals).length) publish('Logic Analyzer', edgeTable(cap.signals, s.signals))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cap])
   const frames = useMemo(() => s.interps.map((it) => ({ it, frames: decode(it, cap.signals) })), [s.interps, cap])
   // UART shows TX and RX on their own lanes; other interpreters use one lane.
   const lanes = frames.flatMap(({ it, frames: fr }) =>
@@ -151,6 +240,7 @@ export function Logic() {
   const single = () => {
     if (!app.device) return toast('No device connected', { detail: 'Connect a device, then press Single.' })
     s.set({ running: false })
+    if (real) return setSingleShot((n) => n + 1)
     setLatest(latest + 1)
     setCapIndex(latest + 1)
     toast('Captured one acquisition')
@@ -351,9 +441,9 @@ export function Logic() {
             aria-label="Plot Actions"
             menu={
               <>
-                <MenuItem prefix={<Download size={16} />} onSelect={() => toast('Exported logic.csv', { detail: `${shown.length} signals, 16,384 samples.` })}>Export Data</MenuItem>
-                <MenuItem prefix={<Upload size={16} />} onSelect={() => toast('Exported logic.png')}>Export Image</MenuItem>
-                <MenuItem prefix={<ScrollText size={16} />} onSelect={() => { setLogging(true); toast('Logging decoded data') }}>Start Logging</MenuItem>
+                <MenuItem prefix={<Download size={16} />} onSelect={() => void saveTable('logic.csv', edgeTable(cap.signals, shown))}>Export Data</MenuItem>
+                <MenuItem prefix={<Upload size={16} />} onSelect={() => void saveImage('logic.png')}>Export Image</MenuItem>
+                <MenuItem prefix={<ScrollText size={16} />} onSelect={() => toggleLoggingFor('Logic Analyzer')}>{logging ? 'Stop Logging' : 'Start Logging'}</MenuItem>
                 <MenuSeparator />
                 <MenuItem prefix={<ZoomIn size={16} />} onSelect={() => zoom(0.25)}>Zoom to Center</MenuItem>
               </>
@@ -506,10 +596,10 @@ export function Logic() {
       <div className="mt-1 flex items-center justify-between">
         <h2 className="m-0 text-base font-semibold leading-6 tracking-[-0.32px]">Decoded Data</h2>
         <div className="flex gap-2">
-          <Button type="tertiary" size="small" prefix={<ScrollText size={16} />} onClick={() => { setLogging(!logging); toast(logging ? 'Logging stopped' : 'Logging decoded data') }}>
+          <Button type="tertiary" size="small" prefix={<ScrollText size={16} />} onClick={() => toggleLoggingFor('Logic Analyzer')}>
             {logging ? 'Stop Logging' : 'Start Logging'}
           </Button>
-          <Button type="secondary" size="small" prefix={<Download size={16} />} onClick={() => toast('Exported decoded.csv', { detail: `${rows.length} frames.` })}>
+          <Button type="secondary" size="small" prefix={<Download size={16} />} disabled={!rows.length} onClick={() => void saveText('decoded.csv', ['Interpreter,Time,Data,MISO,Note', ...frames.flatMap(({ it, frames: fr }) => (it.kind === 'Bus' ? [] : fr.map((f) => [it.title, f.start, f.mo ?? '', f.mi ?? '', f.note ?? ''].map((x) => (typeof x === 'string' && /[",\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : String(x))).join(','))))].join('\n') + '\n')}>
             Export
           </Button>
         </div>

@@ -1,7 +1,7 @@
 // A measurement plot: 10 × 10 division grid, line, step or bar series in real units, Y labels at the
 // right, X ticks below, and a hover probe that reads every visible series under the pointer.
 import { cn } from '@robcholz/geist'
-import { useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { usePrefs } from '../prefs'
 import { axisTicks, si, tick } from './format'
 
@@ -48,6 +48,24 @@ export interface PlotProps {
   y2?: Axis
   className?: string
   onClick?: (x: number, y: number) => void
+  /**
+   * Asks for a new x range: the mouse wheel zooms or scrolls, and dragging pans or selects a region
+   * (Settings → Plots). Without it the plot doesn't respond to either.
+   */
+  onView?: (min: number, max: number) => void
+}
+
+/** The x range zoomed by `k` around fraction `at`, or shifted by `shift` widths, in the axis's own scale. */
+export function moveRange(a: Axis, o: { k?: number; at?: number; shift?: number }): [number, number] {
+  const f = (v: number) => (a.log ? Math.log10(v) : v)
+  const g = (v: number) => (a.log ? 10 ** v : v)
+  const lo = f(a.min)
+  const hi = f(a.max)
+  const w = hi - lo
+  const at = lo + (o.at ?? 0.5) * w
+  const k = o.k ?? 1
+  const s = (o.shift ?? 0) * w
+  return [g(at - (at - lo) * k + s), g(at + (hi - at) * k + s)]
 }
 
 const W = 1000
@@ -105,8 +123,32 @@ function lookup(s: Series, xv: number): { y: number; x: number } | null {
   return { x: xv, y: s.y[lo] + (s.y[hi] - s.y[lo]) * t }
 }
 
-export function Plot({ x, y, series, height = 'calc(380px + max(0px, (100vh - 900px) * 0.75))', probe: probeProp = 'x', ariaLabel, overlay, y2, className, onClick }: PlotProps) {
-  const { curve, plotWidth, hover: hoverPref } = usePrefs()
+export function Plot({ x, y, series, height = 'calc(380px + max(0px, (100vh - 900px) * 0.75))', probe: probeProp = 'x', ariaLabel, overlay, y2, className, onClick, onView }: PlotProps) {
+  const { curve, plotWidth, hover: hoverPref, wheel, drag: dragMode } = usePrefs()
+  const drag = useRef<{ x0: number; fx0: number; moved: boolean; axis: Axis } | null>(null)
+  const [region, setRegion] = useState<[number, number] | null>(null)
+  // The wheel listener is native so it can stop the page scrolling while it zooms the plot.
+  const onWheel = useRef<(e: WheelEvent) => void>(() => undefined)
+  onWheel.current = (e) => {
+    if (!onView) return
+    e.preventDefault()
+    const r = host.current!.getBoundingClientRect()
+    const at = (e.clientX - r.left) / r.width
+    // Trackpads scroll sideways with deltaX; a plain wheel uses deltaY.
+    const sideways = Math.abs(e.deltaX) > Math.abs(e.deltaY)
+    const d = sideways ? e.deltaX : e.deltaY
+    if (!d) return
+    if (wheel === 'Zoom' && !sideways) onView(...moveRange(x, { k: Math.pow(1.0015, d), at }))
+    else onView(...moveRange(x, { shift: d / 1000 }))
+  }
+  const hasView = !!onView
+  useEffect(() => {
+    const el = host.current
+    if (!el || !hasView) return
+    const h = (e: WheelEvent) => onWheel.current(e)
+    el.addEventListener('wheel', h, { passive: false })
+    return () => el.removeEventListener('wheel', h)
+  }, [hasView])
   const probe = hoverPref ? probeProp : 'none'
   const host = useRef<HTMLDivElement>(null)
   const [hover, setHover] = useState<{ fx: number; fy: number; w: number; h: number } | null>(null)
@@ -166,10 +208,30 @@ export function Plot({ x, y, series, height = 'calc(380px + max(0px, (100vh - 90
         className={cn('relative overflow-hidden rounded-small bg-background-100 shadow-[0_0_0_1px_var(--gray-alpha-400)]', probe !== 'none' && 'cursor-crosshair')}
         onPointerMove={(e) => {
           const r = host.current!.getBoundingClientRect()
-          setHover({ fx: (e.clientX - r.left) / r.width, fy: (e.clientY - r.top) / r.height, w: r.width, h: r.height })
+          const fx = (e.clientX - r.left) / r.width
+          setHover({ fx, fy: (e.clientY - r.top) / r.height, w: r.width, h: r.height })
+          const d = drag.current
+          if (!d || !onView) return
+          if (Math.abs(e.clientX - d.x0) > 4) d.moved = true
+          if (!d.moved) return
+          if (dragMode === 'Pan') onView(...moveRange(d.axis, { shift: d.fx0 - fx }))
+          else setRegion([Math.min(d.fx0, fx), Math.max(d.fx0, fx)])
+        }}
+        onPointerDown={(e) => {
+          if (!onView || e.button !== 0) return
+          const r = host.current!.getBoundingClientRect()
+          drag.current = { x0: e.clientX, fx0: (e.clientX - r.left) / r.width, moved: false, axis: x }
+          host.current!.setPointerCapture(e.pointerId)
+        }}
+        onPointerUp={() => {
+          const d = drag.current
+          if (onView && d?.moved && region && region[1] - region[0] > 0.01) onView(fromFrac(region[0], d.axis), fromFrac(region[1], d.axis))
+          setRegion(null)
+          // A drag is not a click: let the click handler know through the flag below.
+          if (d) setTimeout(() => (drag.current = null), 0)
         }}
         onPointerLeave={() => setHover(null)}
-        onClick={onClick && hover ? () => onClick(fromFrac(hover.fx, x), fromFrac(1 - hover.fy, y)) : undefined}
+        onClick={onClick && hover ? () => !drag.current?.moved && onClick(fromFrac(hover.fx, x), fromFrac(1 - hover.fy, y)) : undefined}
       >
         <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={ariaLabel} className="absolute inset-0 size-full">
           {Array.from({ length: xd - 1 }, (_, i) => {
@@ -213,6 +275,7 @@ export function Plot({ x, y, series, height = 'calc(380px + max(0px, (100vh - 90
           )}
         </svg>
         {overlay ? overlay(toPct) : null}
+        {region && <div aria-hidden className="pointer-events-none absolute inset-y-0 shadow-[inset_1px_0_0_var(--blue-700),inset_-1px_0_0_var(--blue-700)]" style={{ background: 'color-mix(in srgb, var(--blue-700) 12%, transparent)', left: region[0] * 100 + '%', width: (region[1] - region[0]) * 100 + '%' }} />}
         {yLabels.map((l, i) => (
           <span
             key={i}

@@ -5,6 +5,9 @@ import { CornerDownLeft, Cpu, Eye, FolderOpen, Plug, RefreshCw, Search, Square, 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Grid2, LabeledInput, LabeledSelect, PageBar, PanelSection, SplitPage } from '../components/Page'
 import { useInterval } from '../components/useInterval'
+import type { ProtocolCalls } from '../../../shared/hw'
+import { hw, useHardware } from '../devices'
+import { files } from '../files'
 import { useStore } from '../store'
 
 const TABS = ['UART', 'SPI', 'I2C', 'CAN', 'CEC', 'JTAG', 'SWD', 'AVR'] as const
@@ -75,6 +78,7 @@ const bytes = (s: string) => s.trim().split(/[\s,]+/).filter(Boolean)
 const isHex = (s: string) => bytes(s).every((b) => /^(0x)?[0-9a-f]{1,2}$/i.test(b))
 const hexOf = (s: string) => [...s].map((c) => c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')).join(' ')
 
+const FAIL = Symbol('failed')
 let memo: { logs: Record<Tab, Line[]>; f: Fields; tab: Tab } | null = null
 
 export function Protocol() {
@@ -82,7 +86,8 @@ export function Protocol() {
   const toast = app.toast
   const [tab, setTab] = useState<Tab>(memo?.tab ?? 'UART')
   const [f, setF] = useState<Fields>(memo?.f ?? F0)
-  const [logs, setLogs] = useState<Record<Tab, Line[]>>(memo?.logs ?? seed)
+  const real = useHardware()
+  const [logs, setLogs] = useState<Record<Tab, Line[]>>(memo?.logs ?? (real ? { UART: [], SPI: [], I2C: [], CAN: [], CEC: [], JTAG: [], SWD: [], AVR: [] } : seed))
   const [open, setOpen] = useState(true)
   const [views, setViews] = useState<Record<string, string>>({})
   const [chain, setChain] = useState<string[][] | null>(null)
@@ -273,6 +278,225 @@ export function Protocol() {
     }
   }
 
+  // Real hardware: the same actions through the device's protocol masters.
+  const pin = (p: string) => Number(/\d+/.exec(p)?.[0] ?? 0)
+  const hex2 = (n: number) => n.toString(16).toUpperCase().padStart(2, '0')
+  /** Calls the device; on failure logs the error to the console and returns FAIL. */
+  const call = async <K extends keyof ProtocolCalls>(T: Tab, name: K, ...args: Parameters<ProtocolCalls[K]>): Promise<ReturnType<ProtocolCalls[K]> | typeof FAIL> => {
+    try {
+      return await hw!.protocol(name, ...args)
+    } catch (e) {
+      const msg = (e as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
+      push(T, [{ d: '··', x: msg, err: true }])
+      return FAIL
+    }
+  }
+  const spiCfg = () => ({ sck: pin(f.spiClk), mosi: pin(f.spiMosi), miso: pin(f.spiMiso), cs: pin(f.spiCs), frequency: (Number(f.spiHz) || 1) * 1e6, mode: Number(f.spiCpol.slice(-1)) || 0, msbFirst: f.spiOrder !== 'LSB First' })
+  const uartSetup = () => call('UART', 'uartSetup', { tx: pin(f.uTx), rx: pin(f.uRx), baud: Number(f.uBaud) || 9600, bits: Number(f.uBits) || 8, parity: f.uPar === 'Odd' ? 1 : f.uPar === 'Even' ? 2 : 0, stop: Number(f.uStop) || 1 })
+  const rxText = useRef('')
+  // UART receive and CAN spy poll the device while open.
+  useInterval(async () => {
+    if (isU && open) {
+      const r = await call('UART', 'uartReceive')
+      if (r === FAIL || !r.data.length) return
+      rxText.current += String.fromCharCode(...r.data)
+      const parts = rxText.current.split(/\r?\n/)
+      rxText.current = parts.pop() ?? ''
+      if (parts.length) push('UART', parts.map((x) => ({ d: 'RX' as const, x, raw: hexOf(x), err: r.parityError })))
+    }
+    if (tab === 'CAN' && f.canSpy) {
+      for (let i = 0; i < 16; i++) {
+        const fr = await call('CAN', 'canReceive')
+        if (fr === FAIL || !fr) break
+        const d = fr.data.map(hex2).join(' ')
+        push('CAN', [{ d: 'RX', x: `ID 0x${fr.id.toString(16).toUpperCase()} · DLC ${fr.data.length}${fr.remote ? ' · Remote' : ''} · ${d}`, raw: `${fr.id.toString(16).toUpperCase()} ${fr.extended ? 1 : 0} ${fr.data.length} ${d}`, r: 'ACK' }])
+      }
+    }
+  }, 150, real && !!app.device && ((isU && open) || (tab === 'CAN' && f.canSpy)))
+  useEffect(() => {
+    if (real && open && app.device) void uartSetup()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [real, open, app.device, f.uBaud, f.uBits, f.uPar, f.uStop, f.uTx, f.uRx])
+  useEffect(() => {
+    if (real && f.canSpy && app.device) void call('CAN', 'canSetup', { tx: pin(f.canTx), rx: pin(f.canRx), rate: (Number(f.canRate) || 500) * 1e3 })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [real, f.canSpy, app.device, f.canTx, f.canRx, f.canRate])
+
+  const hwAct: Partial<Record<keyof typeof act, (...a: never[]) => unknown>> = {
+    uart: async () => {
+      if (!device() || !need(open, 'Port is closed', 'Open the port, then send again.') || !f.draft) return
+      const end = f.ending === 'CR LF' ? '\r\n' : f.ending === 'LF' ? '\n' : f.ending === 'CR' ? '\r' : ''
+      const text = f.draft + end
+      setF((x) => ({ ...x, draft: '' }))
+      if ((await call('UART', 'uartSend', [...text].map((c) => c.charCodeAt(0) & 0xff))) !== FAIL) push('UART', [{ d: 'TX', x: f.draft, raw: hexOf(text) }])
+    },
+    spi: async () => {
+      if (!device()) return
+      if (f.spiMode === 'Spy') return toast('Spy runs in the Logic Analyzer', { detail: 'Add an SPI interpreter there to watch the bus without driving it.' })
+      if (!need(isHex(f.spiW), 'Write bytes are not hex', 'Use bytes like 9F 00 00 00.')) return
+      const w = bytes(f.spiW).map((b) => parseInt(b.replace(/^0x/i, ''), 16))
+      const n = Math.max(0, Math.min(256, Number(f.spiR) || 0))
+      if ((await call('SPI', 'spiSetup', spiCfg())) === FAIL) return
+      const r = await call('SPI', 'spiTransfer', [...w, ...Array(n).fill(0)])
+      if (r === FAIL) return
+      const read = r.slice(w.length).map(hex2).join(' ')
+      push('SPI', [{ d: 'TX', x: 'Write ' + w.map(hex2).join(' '), raw: 'CS↓  ' + w.map(hex2).join(' ') }, ...(n ? [{ d: 'RX' as const, x: 'Read ' + read, raw: r.map(hex2).join(' ') + '  CS↑' }] : [])])
+    },
+    i2c: async (read: boolean) => {
+      if (!device()) return
+      if (f.i2cMode === 'Spy') return toast('Spy runs in the Logic Analyzer', { detail: 'Add an I²C interpreter there to watch the bus without driving it.' })
+      const a = parseInt(f.i2cAddr, 16)
+      if (!need(a >= 0x08 && a <= 0x77, 'Address out of range', 'Use a 7-bit address from 0x08 to 0x77.')) return
+      if (!need(isHex(f.i2cW), 'Write bytes are not hex', 'Use bytes like 01 60.')) return
+      if ((await call('I2C', 'i2cSetup', { scl: pin(f.i2cScl), sda: pin(f.i2cSda), rate: (Number(f.i2cHz) || 100) * 1e3 })) === FAIL) return
+      const w = bytes(f.i2cW).map((b) => parseInt(b.replace(/^0x/i, ''), 16))
+      const n = read ? Math.max(1, Math.min(32, Number(f.i2cR) || 1)) : 0
+      const r = await call('I2C', 'i2cTransfer', a, w, n)
+      if (r === FAIL) return
+      const addr = '0x' + hex2(a)
+      const ack = r.nak === 0
+      push('I2C', [
+        { d: 'TX', x: `Write ${addr}: ${w.map(hex2).join(' ')}`, raw: `S ${hex2(a << 1)} ${ack ? 'A' : 'N'} ${w.map(hex2).join(' A ')} P`, r: ack ? 'ACK' : 'NAK' },
+        ...(read && ack ? [{ d: 'RX' as const, x: `Read ${addr}: ${r.data.map(hex2).join(' ')}`, raw: `Sr ${hex2((a << 1) | 1)} A ${r.data.map(hex2).join(' ')} N P`, r: 'ACK' as const }] : [])
+      ])
+    },
+    scan: async () => {
+      if (!device()) return
+      push('I2C', [{ d: '··', x: 'Scanning 0x08 to 0x77…' }])
+      setBusy('Scanning')
+      try {
+        if ((await call('I2C', 'i2cSetup', { scl: pin(f.i2cScl), sda: pin(f.i2cSda), rate: (Number(f.i2cHz) || 100) * 1e3 })) === FAIL) return
+        const found: string[] = []
+        for (let a = 0x08; a <= 0x77; a++) {
+          const r = await call('I2C', 'i2cTransfer', a, [], 0)
+          if (r !== FAIL && r.nak === 0) found.push('0x' + hex2(a))
+        }
+        push('I2C', [{ d: 'RX', x: found.length ? `Found ${found.length} device${found.length > 1 ? 's' : ''}: ${found.join(', ')}` : 'No devices answered', r: found.length ? 'ACK' : 'NAK' }])
+      } finally {
+        setBusy('')
+      }
+    },
+    can: async () => {
+      if (!device()) return
+      const d = bytes(f.canD)
+      if (!need(isHex(f.canD) && d.length <= 8, 'Data is not valid', 'Use up to 8 hex bytes, like DE AD BE EF.')) return
+      const id = parseInt(f.canId, 16)
+      if ((await call('CAN', 'canSetup', { tx: pin(f.canTx), rx: pin(f.canRx), rate: (Number(f.canRate) || 500) * 1e3 })) === FAIL) return
+      const data = d.map((b) => parseInt(b.replace(/^0x/i, ''), 16))
+      if ((await call('CAN', 'canSend', { id, extended: f.canExt, remote: f.canRtr, data })) === FAIL) return
+      push('CAN', [{ d: 'TX', x: `ID 0x${id.toString(16).toUpperCase()} · DLC ${data.length}${f.canRtr ? ' · Remote' : ''} · ${data.map(hex2).join(' ')}`, raw: `${id.toString(16).toUpperCase()} ${f.canExt ? 1 : 0} ${data.length} ${data.map(hex2).join(' ')}` }])
+    },
+    cec: () => toast('CEC is not available on this device yet', { detail: 'CEC needs precise timing on a single pin, which the device cannot drive from this app yet.' }),
+    cecPoll: () => toast('CEC is not available on this device yet', { detail: 'CEC needs precise timing on a single pin, which the device cannot drive from this app yet.' }),
+    jScan: async () => {
+      if (!device()) return
+      setBusy('Scanning Chain')
+      try {
+        await call('JTAG', 'jtagSetup', { tck: pin(f.jTck), tms: pin(f.jTms), tdi: pin(f.jTdi), tdo: pin(f.jTdo) })
+        const ids = await call('JTAG', 'jtagScan')
+        if (ids === FAIL) return
+        const c = ids.map((id) => ['0x' + id.toString(16).toUpperCase().padStart(8, '0'), id ? 'IDCODE' : 'Bypass only', '?'])
+        setChain(c)
+        push('JTAG', [{ d: '··', x: ids.length ? `Chain scanned: ${ids.length} device${ids.length > 1 ? 's' : ''}` : 'No devices found. Check TCK, TMS, TDI, TDO and power.' }, ...c.map((d, i) => ({ d: 'RX' as const, x: `Device ${i}: IDCODE ${d[0]}`, raw: `DR 32 bits: ${d[0]}` }))])
+      } finally {
+        setBusy('')
+      }
+    },
+    jShift: async () => {
+      if (!device()) return
+      if (!need(/^[0-9a-f]+$/i.test(f.jVal), 'Value is not hex', 'Use a hex value like 09.')) return
+      await call('JTAG', 'jtagSetup', { tck: pin(f.jTck), tms: pin(f.jTms), tdi: pin(f.jTdi), tdo: pin(f.jTdo) })
+      const len = Math.max(1, Math.min(1024, Number(f.jLen) || 1))
+      const out = await call('JTAG', 'jtagShift', f.jReg as 'IR' | 'DR', len, f.jVal)
+      if (out === FAIL) return
+      push('JTAG', [{ d: 'TX', x: `Shift ${f.jReg} ${len} bits: 0x${f.jVal.toUpperCase()}` }, { d: 'RX', x: `TDO 0x${out}`, raw: `TDO ${BigInt('0x' + out).toString(2).padStart(len, '0')}` }])
+    },
+    jReset: async () => {
+      if (!device()) return
+      await call('JTAG', 'jtagSetup', { tck: pin(f.jTck), tms: pin(f.jTms), tdi: pin(f.jTdi), tdo: pin(f.jTdo) })
+      if ((await call('JTAG', 'jtagReset')) !== FAIL) push('JTAG', [{ d: '··', x: 'TAP reset: TMS high for 6 clocks, now Run-Test/Idle' }])
+    },
+    sConnect: async () => {
+      if (!device()) return
+      if (swd) {
+        setSwd(false)
+        return push('SWD', [{ d: '··', x: 'Disconnected' }])
+      }
+      await call('SWD', 'swdSetup', { clk: pin(f.sClk), io: pin(f.sIo) })
+      const id = await call('SWD', 'swdConnect')
+      if (id === FAIL) return
+      setSwd(true)
+      push('SWD', [{ d: '··', x: 'Line reset and JTAG-to-SWD sequence sent' }, { d: 'RX', x: `DPIDR 0x${id.toString(16).toUpperCase().padStart(8, '0')}`, raw: `OK ${id.toString(16).toUpperCase()}`, r: 'ACK' }])
+    },
+    sRead: async () => {
+      if (!device() || !need(swd, 'Not connected', 'Press Connect to read the Debug Port ID first.')) return
+      const v = await call('SWD', 'swdTransfer', f.sPort === 'AP', true, parseInt(f.sAddr, 16))
+      if (v === FAIL) return
+      const h = v.toString(16).toUpperCase().padStart(8, '0')
+      push('SWD', [{ d: 'RX', x: `Read ${f.sPort} ${f.sAddr}: 0x${h}`, raw: `OK ${h}`, r: 'ACK' }])
+    },
+    sWrite: async () => {
+      if (!device() || !need(swd, 'Not connected', 'Press Connect to read the Debug Port ID first.')) return
+      if (!need(/^[0-9a-f]{1,8}$/i.test(f.sVal), 'Value is not valid', 'Use up to 8 hex digits.')) return
+      if ((await call('SWD', 'swdTransfer', f.sPort === 'AP', false, parseInt(f.sAddr, 16), parseInt(f.sVal, 16))) === FAIL) return
+      push('SWD', [{ d: 'TX', x: `Write ${f.sPort} ${f.sAddr}: 0x${f.sVal.toUpperCase().padStart(8, '0')}`, raw: `OK ${f.sVal.toUpperCase()}`, r: 'ACK' }])
+    },
+    aSig: async () => {
+      if (!device()) return
+      const sig = await call('AVR', 'avrEnter', { sck: pin(f.aSck), mosi: pin(f.aMosi), miso: pin(f.aMiso), cs: pin(f.aRst), frequency: (Number(f.aHz) || 125) * 1e3, mode: 0 })
+      if (sig === FAIL) return
+      const s = sig.map(hex2).join(' ')
+      const chip = Object.entries(CHIPS).find(([, v]) => v === s)?.[0]
+      setAvr(true)
+      push('AVR', [{ d: '··', x: 'Programming Enable: AC 53 00 00 → 53 echoed' }, { d: 'RX', x: `Signature ${s} · ${chip ?? 'Unknown chip'}`, err: chip !== f.aChip }])
+      if (chip && chip !== f.aChip) toast(`This is an ${chip}`, { detail: `The chip setting says ${f.aChip}. Change it before programming.` })
+    },
+    aRun: async () => {
+      if (!device() || !need(avr, 'Not in programming mode', 'Press Read Signature first.')) return
+      const addr = parseInt(f.aAddr, 16) || 0
+      let out = ''
+      if (f.aCmd === 'Read Signature') {
+        const sig = await call('AVR', 'avrEnter', { sck: pin(f.aSck), mosi: pin(f.aMosi), miso: pin(f.aMiso), cs: pin(f.aRst), frequency: (Number(f.aHz) || 125) * 1e3, mode: 0 })
+        if (sig !== FAIL) out = sig.map(hex2).join(' ')
+      } else if (f.aCmd === 'Read Fuses' || f.aCmd === 'Read Lock Bits') {
+        const fu = await call('AVR', 'avrFuses')
+        if (fu !== FAIL) out = f.aCmd === 'Read Fuses' ? `Low ${hex2(fu.low)} · High ${hex2(fu.high)} · Extended ${hex2(fu.ext)}` : hex2(fu.lock)
+      } else if (f.aCmd === 'Read Flash Word') {
+        const w = await call('AVR', 'avrReadFlashWord', addr)
+        if (w !== FAIL) out = `0x${f.aAddr}: ${w.map(hex2).join(' ')}`
+      } else {
+        const b = await call('AVR', 'avrReadEeprom', addr)
+        if (b !== FAIL) out = `0x${f.aAddr}: ${hex2(b)}`
+      }
+      if (out) push('AVR', [{ d: 'RX', x: `${f.aCmd} · ${out}` }])
+    },
+    aFuseW: async () => {
+      if (!device() || !need(avr, 'Not in programming mode', 'Press Read Signature first.')) return
+      if (!need([f.aLfuse, f.aHfuse, f.aEfuse, f.aLock].every((x) => /^[0-9a-f]{2}$/i.test(x)), 'Fuse values are not valid', 'Use two hex digits for each fuse, like DE.')) return
+      const v = { low: parseInt(f.aLfuse, 16), high: parseInt(f.aHfuse, 16), ext: parseInt(f.aEfuse, 16), lock: parseInt(f.aLock, 16) }
+      if ((await call('AVR', 'avrWriteFuses', v)) === FAIL) return
+      push('AVR', [{ d: 'TX', x: `Wrote fuses Low ${f.aLfuse} · High ${f.aHfuse} · Extended ${f.aEfuse} · Lock ${f.aLock}` }])
+    },
+    aProg: async (verb: 'Program' | 'Verify' | 'Erase') => {
+      if (!device() || !need(avr, 'Not in programming mode', 'Press Read Signature first.')) return
+      setBusy(verb === 'Program' ? 'Programming' : verb === 'Verify' ? 'Verifying' : 'Erasing')
+      setPct(50)
+      try {
+        if (verb === 'Erase') {
+          if ((await call('AVR', 'avrErase')) === FAIL) return
+          push('AVR', [{ d: '··', x: 'Chip erased' }])
+        } else {
+          const n = await call('AVR', verb === 'Program' ? 'avrProgram' : 'avrVerify', f.aFile, f.aChip)
+          if (n !== FAIL) push('AVR', [{ d: '··', x: verb === 'Program' ? `Programmed ${f.aFile}: ${n} bytes, verified` : `Flash matches the file: ${n} bytes` }])
+        }
+      } finally {
+        setPct(100)
+        setBusy('')
+      }
+    }
+  }
+  const A = (real ? { ...act, ...hwAct } : act) as typeof act
+
   const topBtn: { text: string; icon: ReactNode; onClick: () => void } = isU
     ? { text: open ? 'Close Port' : 'Open Port', icon: open ? <X size={16} /> : <Plug size={16} />, onClick: () => { setOpen(!open); push('UART', [{ d: '··', x: !open ? `Port opened at ${f.uBaud} bit/s` : 'Port closed' }]) } }
     : spy[tab] !== undefined
@@ -280,6 +504,7 @@ export function Protocol() {
           text: spy[tab] ? 'Stop Spy' : 'Start Spy',
           icon: spy[tab] ? <Square size={16} /> : <Eye size={16} />,
           onClick: () => {
+            if (real && tab !== 'CAN') return toast(tab === 'CEC' ? 'CEC is not available on this device yet' : 'Spy runs in the Logic Analyzer', { detail: tab === 'CEC' ? 'CEC needs precise timing on a single pin.' : `Add an ${tab} interpreter there to watch the bus without driving it.` })
             const on = !spy[tab]
             const k = ({ SPI: 'spiMode', I2C: 'i2cMode', CAN: 'canSpy', CEC: 'cecSpy' } as const)[tab as 'SPI']
             setF((x) => ({ ...x, [k]: tab === 'SPI' || tab === 'I2C' ? (on ? 'Spy' : 'Master') : on }) as Fields)
@@ -287,10 +512,10 @@ export function Protocol() {
           }
         }
       : tab === 'JTAG'
-        ? { text: 'Scan Chain', icon: <Search size={16} />, onClick: act.jScan }
+        ? { text: 'Scan Chain', icon: <Search size={16} />, onClick: A.jScan }
         : tab === 'SWD'
-          ? { text: swd ? 'Disconnect' : 'Connect', icon: swd ? <X size={16} /> : <Plug size={16} />, onClick: act.sConnect }
-          : { text: 'Read Signature', icon: <Cpu size={16} />, onClick: act.aSig }
+          ? { text: swd ? 'Disconnect' : 'Connect', icon: swd ? <X size={16} /> : <Plug size={16} />, onClick: A.sConnect }
+          : { text: 'Read Signature', icon: <Cpu size={16} />, onClick: A.aSig }
 
   const stat: { state: StatusDotState; label: string } = busy
     ? { state: 'BUILDING', label: busy }
@@ -356,77 +581,77 @@ export function Protocol() {
   const compose: Partial<Record<Tab, ReactNode>> = {
     UART: (
       <>
-        <div className="min-w-0 flex-1">{inp('draft', 'Data to send', 'Type a message and press Enter', act.uart)}</div>
+        <div className="min-w-0 flex-1">{inp('draft', 'Data to send', 'Type a message and press Enter', A.uart)}</div>
         <div className="w-[104px]">{sel('ending', 'Line Ending', ['CR LF', 'LF', 'None'])}</div>
-        {sendBtn('Send', act.uart)}
+        {sendBtn('Send', A.uart)}
       </>
     ),
     SPI: (
       <>
-        <div className="min-w-0 flex-1">{inp('spiW', 'Write Bytes', 'Hex bytes to write, like 9F 00 00 00', act.spi)}</div>
-        <div className="w-24">{inp('spiR', 'Read Count', 'Read Count', act.spi, { suffix: 'B', mono: false })}</div>
-        {sendBtn('Transfer', act.spi)}
+        <div className="min-w-0 flex-1">{inp('spiW', 'Write Bytes', 'Hex bytes to write, like 9F 00 00 00', A.spi)}</div>
+        <div className="w-24">{inp('spiR', 'Read Count', 'Read Count', A.spi, { suffix: 'B', mono: false })}</div>
+        {sendBtn('Transfer', A.spi)}
       </>
     ),
     I2C: (
       <>
         <div className="w-[88px]">{inp('i2cAddr', 'Address', '0x48')}</div>
-        <div className="min-w-0 flex-1">{inp('i2cW', 'Write Bytes', 'Hex bytes, like 01 60', () => act.i2c(true))}</div>
+        <div className="min-w-0 flex-1">{inp('i2cW', 'Write Bytes', 'Hex bytes, like 01 60', () => A.i2c(true))}</div>
         <div className="w-24">{inp('i2cR', 'Read Count', 'Read Count', undefined, { suffix: 'B', mono: false })}</div>
-        <Button size="small" type="tertiary" prefix={<Search size={16} />} onClick={act.scan}>
+        <Button size="small" type="tertiary" prefix={<Search size={16} />} onClick={A.scan}>
           Scan
         </Button>
-        <Button size="small" type="secondary" onClick={() => act.i2c(false)}>
+        <Button size="small" type="secondary" onClick={() => A.i2c(false)}>
           Write
         </Button>
-        {sendBtn('Write and Read', () => act.i2c(true))}
+        {sendBtn('Write and Read', () => A.i2c(true))}
       </>
     ),
     CAN: (
       <>
         <div className="w-28">{inp('canId', 'ID', '0x123')}</div>
-        <div className="min-w-0 flex-1">{inp('canD', 'Data', 'Up to 8 hex bytes', act.can)}</div>
-        {sendBtn('Send Frame', act.can)}
+        <div className="min-w-0 flex-1">{inp('canD', 'Data', 'Up to 8 hex bytes', A.can)}</div>
+        {sendBtn('Send Frame', A.can)}
       </>
     ),
     CEC: (
       <>
         <div className="w-40">{sel('cecTo', 'Destination', CEC_ADDR)}</div>
         <div className="w-60">{sel('cecOp', 'Opcode', CEC_OPS)}</div>
-        <div className="min-w-0 flex-1">{inp('cecArg', 'Operands', 'Operands, like 41', act.cec)}</div>
-        <Button size="small" type="tertiary" prefix={<Search size={16} />} onClick={act.cecPoll}>
+        <div className="min-w-0 flex-1">{inp('cecArg', 'Operands', 'Operands, like 41', A.cec)}</div>
+        <Button size="small" type="tertiary" prefix={<Search size={16} />} onClick={A.cecPoll}>
           Poll
         </Button>
-        {sendBtn('Send', act.cec)}
+        {sendBtn('Send', A.cec)}
       </>
     ),
     JTAG: (
       <>
         <Switch aria-label="Register" value={f.jReg} options={['IR', 'DR']} onChange={set('jReg')} />
         <div className="w-[104px]">{inp('jLen', 'Length', 'Length', undefined, { suffix: 'bits', mono: false })}</div>
-        <div className="min-w-0 flex-1">{inp('jVal', 'Value', 'Hex value', act.jShift)}</div>
-        <Button size="small" type="tertiary" prefix={<RefreshCw size={16} />} onClick={act.jReset}>
+        <div className="min-w-0 flex-1">{inp('jVal', 'Value', 'Hex value', A.jShift)}</div>
+        <Button size="small" type="tertiary" prefix={<RefreshCw size={16} />} onClick={A.jReset}>
           Reset TAP
         </Button>
-        {sendBtn('Shift', act.jShift)}
+        {sendBtn('Shift', A.jShift)}
       </>
     ),
     SWD: (
       <>
         <Switch aria-label="Port" value={f.sPort} options={['DP', 'AP']} onChange={set('sPort')} />
         <div className="w-[200px]">{sel('sAddr', 'Register', SWD_REGS)}</div>
-        <div className="min-w-0 flex-1">{inp('sVal', 'Value', '32-bit hex value', act.sWrite)}</div>
-        <Button size="small" type="secondary" onClick={act.sRead}>
+        <div className="min-w-0 flex-1">{inp('sVal', 'Value', '32-bit hex value', A.sWrite)}</div>
+        <Button size="small" type="secondary" onClick={A.sRead}>
           Read
         </Button>
-        {sendBtn('Write', act.sWrite)}
+        {sendBtn('Write', A.sWrite)}
       </>
     ),
     AVR: (
       <>
         <div className="w-60">{sel('aCmd', 'Command', AVR_CMDS)}</div>
-        <div className="min-w-0 flex-1">{inp('aAddr', 'Address', 'Hex address', act.aRun)}</div>
-        {sendBtn('Run', act.aRun)}
+        <div className="min-w-0 flex-1">{inp('aAddr', 'Address', 'Hex address', A.aRun)}</div>
+        {sendBtn('Run', A.aRun)}
       </>
     )
   }
@@ -578,7 +803,7 @@ export function Protocol() {
             <Button size="small" type="secondary" onClick={() => { if (device() && need(avr, 'Not in programming mode', 'Press Read Signature first.')) push('AVR', [{ d: 'RX', x: `Fuses Low ${f.aLfuse} · High ${f.aHfuse} · Extended ${f.aEfuse} · Lock ${f.aLock}` }]) }}>
               Read
             </Button>
-            <Button size="small" type="secondary" onClick={act.aFuseW}>
+            <Button size="small" type="secondary" onClick={A.aFuseW}>
               Write Fuses
             </Button>
           </div>
@@ -586,19 +811,22 @@ export function Protocol() {
         <PanelSection title="Flash">
           <div className="flex gap-2">
             <div className="min-w-0 flex-1">{inp('aFile', 'HEX File', 'HEX file')}</div>
-            <Button size="small" type="secondary" prefix={<FolderOpen size={16} />} onClick={() => { setF((x) => ({ ...x, aFile: '~/avr/firmware.hex' })); toast('Chose firmware.hex') }}>
+            <Button size="small" type="secondary" prefix={<FolderOpen size={16} />} onClick={async () => {
+              const r = await files?.open([{ name: 'Intel HEX', extensions: ['hex', 'ihex'] }])
+              if (r) setF((x) => ({ ...x, aFile: r.path }))
+            }}>
               Browse
             </Button>
           </div>
           <Progress value={pct} aria-label="Flash progress" />
           <div className="flex flex-wrap gap-2">
-            <Button size="small" prefix={<Upload size={16} />} disabled={!!busy} onClick={() => act.aProg('Program')}>
+            <Button size="small" prefix={<Upload size={16} />} disabled={!!busy} onClick={() => A.aProg('Program')}>
               Program
             </Button>
-            <Button size="small" type="secondary" disabled={!!busy} onClick={() => act.aProg('Verify')}>
+            <Button size="small" type="secondary" disabled={!!busy} onClick={() => A.aProg('Verify')}>
               Verify
             </Button>
-            <Button size="small" type="tertiary" prefix={<Trash2 size={16} />} disabled={!!busy} onClick={() => act.aProg('Erase')}>
+            <Button size="small" type="tertiary" prefix={<Trash2 size={16} />} disabled={!!busy} onClick={() => A.aProg('Erase')}>
               Erase Chip
             </Button>
           </div>

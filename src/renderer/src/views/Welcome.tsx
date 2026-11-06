@@ -3,9 +3,10 @@ import { Banner, Button, FormModal, Material, Pill, Table } from '@robcholz/geis
 import { FolderOpen, Info, Plus, TriangleAlert } from 'lucide-react'
 import { useState } from 'react'
 import { PageBar, ScrollPage } from '../components/Page'
-import { devices } from '../devices'
+import { useDevice } from '../devices'
 import { pageById, type PageId } from '../routes'
 import { useStore } from '../store'
+import { newWorkspace, openWorkspace, useRecent } from '../workspace'
 
 const LAUNCH: { id: PageId; text: string }[] = [
   { id: 'scope', text: 'Oscilloscope with triggers, math and measurements' },
@@ -18,34 +19,32 @@ const LAUNCH: { id: PageId; text: string }[] = [
   { id: 'script', text: 'Automate any instrument in TypeScript' }
 ]
 
-const RECENT = [
-  { n: 'Audio Amp Bring-Up', p: '~/Projects/amp', d: 'Analog Discovery 3', m: 'Today, 11:42', shared: false },
-  { n: 'SPI Flash Debug', p: '~/Projects/flash', d: 'Digital Discovery', m: 'Yesterday', shared: false },
-  { n: 'Filter Lab', p: 'Team / EE 230', d: 'Analog Discovery 3', m: 'Nov 3', shared: true },
-  { n: 'Motor Driver Tests', p: 'Team / Robotics', d: 'Analog Discovery Pro 3450', m: 'Oct 28', shared: true },
-  { n: 'Untitled', p: '~/Documents', d: 'Demo Device', m: 'Oct 21', shared: false }
-]
+const when = (at: number): string => {
+  const d = new Date(at)
+  const today = new Date()
+  const days = Math.floor((new Date(today.toDateString()).getTime() - new Date(d.toDateString()).getTime()) / 864e5)
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return days === 0 ? `Today, ${time}` : days === 1 ? 'Yesterday' : d.toLocaleDateString([], { month: 'short', day: 'numeric' })
+}
+const home = (p: string): string => p.replace(/^\/(Users|home)\/[^/]+/, '~')
 
 export function Welcome() {
   const s = useStore()
-  const [filter, setFilter] = useState<'all' | 'device' | 'shared'>('all')
+  const [filter, setFilter] = useState<'all' | 'device'>('all')
   const [banner, setBanner] = useState(true)
   const [create, setCreate] = useState(false)
-  const dev = s.device ? devices[s.device] : null
-  const rows = RECENT.filter((r) => (filter === 'shared' ? r.shared : filter === 'device' ? !!dev && r.d === dev.name : true))
-
-  const open = (name: string) => {
-    s.setWorkspace(name)
-    s.go('scope')
-    s.toast(`Opened ${name}`)
-  }
+  const dev = useDevice()
+  const recent = useRecent((r) => r.recent)
+  const rows = recent
+    .filter((r) => (filter === 'device' ? !!dev && r.device === dev.name : true))
+    .map((r) => ({ n: r.name, p: home(r.path.replace(/[\\/][^\\/]+$/, '')), d: r.device, m: when(r.at), path: r.path }))
 
   return (
     <ScrollPage
       className="p-0!"
       bar={
         <PageBar title="Welcome">
-          <Button size="small" type="secondary" prefix={<FolderOpen size={16} />} onClick={() => open('Filter Lab')}>
+          <Button size="small" type="secondary" prefix={<FolderOpen size={16} />} onClick={() => void openWorkspace()}>
             Open Workspace
           </Button>
           <Button size="small" prefix={<Plus size={16} />} onClick={() => setCreate(true)}>
@@ -90,9 +89,6 @@ export function Welcome() {
             <Pill size="small" active={filter === 'device'} onClick={() => setFilter('device')}>
               This Device
             </Pill>
-            <Pill size="small" active={filter === 'shared'} onClick={() => setFilter('shared')}>
-              Shared
-            </Pill>
           </div>
         </div>
         <Table
@@ -104,21 +100,19 @@ export function Welcome() {
             { key: 'm', title: 'Modified', align: 'right' }
           ]}
           rows={rows}
-          rowKey={(r) => r.n}
-          onRowClick={(r) => open(r.n)}
+          rowKey={(r) => r.path}
+          onRowClick={(r) => void openWorkspace(r.path)}
         />
-        {rows.length === 0 && <p className="m-0 text-sm text-gray-900">{filter === 'device' ? 'No workspaces were saved with this device yet.' : 'No shared workspaces.'}</p>}
+        {rows.length === 0 && <p className="m-0 text-sm text-gray-900">{filter === 'device' ? 'No workspaces were saved with this device yet.' : 'Workspaces you save or open show here. Press ⌘S to save this one.'}</p>}
       </div>
       <FormModal
         open={create}
         onClose={() => setCreate(false)}
         title="New Workspace"
-        fields={[
-          { key: 'n', label: 'Name', placeholder: 'Bench Tests', required: true },
-          { key: 'p', label: 'Location', value: '~/Documents', required: true }
-        ]}
+        description="Every instrument starts from its default settings. Save the current workspace first if you want to keep it."
+        fields={[{ key: 'n', label: 'Name', placeholder: 'Bench Tests', required: true }]}
         submitLabel="Create Workspace"
-        onSubmit={(v) => open(v.n)}
+        onSubmit={(v) => newWorkspace(v.n.trim())}
       />
     </ScrollPage>
   )
