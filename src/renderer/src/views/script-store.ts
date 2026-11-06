@@ -198,7 +198,7 @@ export const useScript = create<ScriptState>()(
           if (s.modules !== 'Built-in Only') toast('npm imports are not available yet', 'Scripts can import "oscillo" and files in this workspace.')
           set({ run: { status: 'running', line: 0, file: name, vars: [] }, btab: 'c', cons: [...s.cons, line(`Running ${name}`, 'info')].slice(-500) })
           try {
-            await api.run(s.files, name, { timeout: TIMEOUT[s.timeout] ?? 30, breakpoints: s.bps, network: s.sandbox === 'Allow Network' })
+            await api.run(s.files, name, { timeout: TIMEOUT[s.timeout] ?? 30, breakpoints: s.bps, network: s.sandbox === 'Allow Network', anyPath: s.sandbox !== 'Isolated' })
           } catch (e) {
             const msg = (e as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
             set((x) => ({ run: { ...x.run, status: 'failed' }, cons: [...x.cons, line(msg, 'err')] }))
@@ -234,6 +234,21 @@ export const useScript = create<ScriptState>()(
     }
   )
 )
+
+// Keep a copy on disk (Documents/Oscillo/Scripts) so scripts also run from a terminal.
+if (api) {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let last: Record<string, string> | null = null
+  const save = (): void => {
+    const files = useScript.getState().files
+    if (files === last) return
+    last = files
+    clearTimeout(timer)
+    timer = setTimeout(() => void api.sync(files), 1000)
+  }
+  useScript.subscribe(save)
+  setTimeout(save, 0)
+}
 
 // Events from the running script.
 api?.onEvent((e) => {

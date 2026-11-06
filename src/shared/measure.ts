@@ -89,3 +89,17 @@ export function measure(v: ArrayLike<number>, rate: number, name: MeasurementNam
     }
   return n ? (100 * high) / n / rate / period : NaN
 }
+
+/** Amplitude and phase of `v` at frequency f over a whole number of periods (single-bin DFT). */
+export function tone(v: ArrayLike<number>, rate: number, f: number): { re: number; im: number } {
+  const periods = Math.floor((v.length * f) / rate)
+  const n = periods >= 1 ? Math.round((periods * rate) / f) : v.length
+  let re = 0
+  let im = 0
+  const w = (2 * Math.PI * f) / rate
+  for (let i = 0; i < n; i++) {
+    re += v[i] * Math.cos(w * i)
+    im -= v[i] * Math.sin(w * i)
+  }
+  return { re: (2 * re) / n, im: (2 * im) / n }
+}

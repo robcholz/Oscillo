@@ -1,7 +1,8 @@
 // The Oscillo API for scripts and the MCP server: instruments as objects over the open device.
 // Settings a script changes are reported through `apply`, so the instrument pages follow along.
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { homedir } from 'node:os'
+import { isAbsolute, join } from 'node:path'
 import type { Hardware } from './hardware'
 import { measure, MEASUREMENTS, type MeasurementName } from '../shared/measure'
 import type { ScriptApply } from '../shared/script'
@@ -14,6 +15,8 @@ export interface ApiContext {
   apply: (a: ScriptApply) => void
   /** Called when a script writes a file. */
   wrote?: (path: string) => void
+  /** File may open any path. */
+  anyPath?: boolean
 }
 
 const desc = Symbol.for('oscillo.describe')
@@ -241,7 +244,11 @@ export function createApi(ctx: ApiContext) {
   class File {
     readonly path: string
     constructor(name: string) {
-      if (!/^[\w.\- ]+$/.test(name)) throw new Error('Use a plain file name like sweep.csv')
+      if (ctx.anyPath && isAbsolute(name.replace(/^~(?=\/|$)/, homedir()))) {
+        this.path = name.replace(/^~(?=\/|$)/, homedir())
+        return
+      }
+      if (!/^[\w.\- ]+$/.test(name)) throw new Error(ctx.anyPath ? 'Use a file name like sweep.csv, or a full path' : 'Use a plain file name like sweep.csv. Set Sandbox to Allow Files to use other folders.')
       mkdirSync(ctx.dataDir, { recursive: true })
       this.path = join(ctx.dataDir, name)
     }

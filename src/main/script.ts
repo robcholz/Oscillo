@@ -1,7 +1,8 @@
 // Runs Script's TypeScript (checked and compiled by script-compile.ts) in a VM context with only the
 // Oscillo API, console and timers, pausing at breakpoints and steps.
 import { app, ipcMain, shell, type WebContents } from 'electron'
-import { join } from 'node:path'
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { basename, dirname, isAbsolute, join } from 'node:path'
 import { inspect } from 'node:util'
 import vm from 'node:vm'
 import ts from 'typescript'
@@ -61,10 +62,18 @@ class Run {
   }
 }
 
-export function registerScript(hw: Hardware): void {
+/** Runs a script to the end (or until stopped), reporting through `emit`. One run at a time. */
+export type ScriptRunner = (files: Record<string, string>, entry: string, opts: RunOptions, emit: (e: ScriptEvent) => void) => Promise<void>
+
+export function registerScript(hw: Hardware): ScriptRunner {
   let run: Run | null = null
   const dataDir = join(app.getPath('documents'), 'Oscillo')
 
+  ipcMain.handle(SCRIPT.sync, (_e, files: Record<string, string>) => {
+    const dir = join(dataDir, 'Scripts')
+    mkdirSync(dir, { recursive: true })
+    for (const [name, code] of Object.entries(files)) if (/^[\w.\- ]+\.ts$/.test(name)) writeFileSync(join(dir, name), code)
+  })
   ipcMain.handle(SCRIPT.check, (_e, files: Record<string, string>, file: string) => check(files, file))
   ipcMain.handle(SCRIPT.folder, async () => {
     await shell.openPath(dataDir)
@@ -89,13 +98,16 @@ export function registerScript(hw: Hardware): void {
     }
   })
   ipcMain.handle(SCRIPT.run, async (e, files: Record<string, string>, entry: string, opts: RunOptions) => {
-    if (run) throw new Error('A script is already running')
     const sender: WebContents = e.sender
-    const emit = (ev: ScriptEvent) => !sender.isDestroyed() && sender.send(SCRIPT.event, ev)
+    await execute(files, entry, opts, (ev) => !sender.isDestroyed() && sender.send(SCRIPT.event, ev))
+  })
+
+  const execute: ScriptRunner = async (files, entry, opts, emit) => {
+    if (run) throw new Error('A script is already running')
     const r = new Run(emit, opts.breakpoints, opts.timeout)
     run = r
     const wrote = new Set<string>()
-    const api = createApi({ hw, dataDir, apply: (apply) => emit({ type: 'apply', apply }), wrote: (p) => wrote.add(p) })
+    const api = createApi({ hw, dataDir, apply: (apply) => emit({ type: 'apply', apply }), wrote: (p) => wrote.add(p), anyPath: opts.anyPath })
     const print = (kind: 'out' | 'err') => (...a: unknown[]) => emit({ type: 'console', kind, text: a.map((x) => (typeof x === 'string' ? x : inspect(x, { depth: 2, breakLength: 120 }))).join(' ') })
     const context = vm.createContext({
       console: { log: print('out'), info: print('out'), warn: print('err'), error: print('err') },
@@ -146,5 +158,38 @@ export function registerScript(hw: Hardware): void {
     } finally {
       run = null
     }
+  }
+  return execute
+}
+
+/**
+ * Runs a script from Documents/Oscillo/Scripts (or a path) on the first free real device, else the
+ * Demo Device, printing its console. Returns the exit code.
+ */
+export async function runCli(hw: Hardware, name: string, opts: Omit<RunOptions, 'breakpoints'>): Promise<number> {
+  const dir = join(app.getPath('documents'), 'Oscillo', 'Scripts')
+  const path = isAbsolute(name) ? name : join(dir, name.endsWith('.ts') ? name : name + '.ts')
+  if (!existsSync(path)) {
+    process.stderr.write(`No script at ${path}. Scripts from the app are saved to ${dir}.\n`)
+    return 2
+  }
+  const base = dirname(path)
+  const files: Record<string, string> = {}
+  for (const f of readdirSync(base)) if (f.endsWith('.ts')) files[f] = readFileSync(join(base, f), 'utf8')
+  const list = hw.devices()
+  const pick = list.find((d) => d.link !== 'SIM' && !d.busy) ?? list.find((d) => d.link === 'SIM')!
+  hw.open(pick.key, 1)
+  process.stderr.write(`Running ${basename(path)} on ${pick.name}\n`)
+  const problems = check(files, basename(path))
+  if (problems.length) {
+    for (const p of problems) process.stderr.write(`${p.file}:${p.line}:${p.col} ${p.message}\n`)
+    return 1
+  }
+  let ok = true
+  await registerScript(hw)(files, basename(path), { ...opts, breakpoints: {} }, (e) => {
+    if (e.type === 'console') (e.kind === 'out' ? process.stdout : process.stderr).write(e.text + '\n')
+    if (e.type === 'done') ok = e.ok
   })
+  hw.close()
+  return ok ? 0 : 1
 }

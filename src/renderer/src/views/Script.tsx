@@ -5,6 +5,7 @@ import { Check, ChevronRight, CircleX, FileCode, FileText, Pencil, Play, Plus, S
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { CodeEditor, highlight } from '../components/Code'
 import { Grid2, PageBar, PanelSection, SplitPage } from '../components/Page'
+import { useMcp } from './mcp-store'
 import { LIB, TEMPLATES, TYPES, useScript, type BottomTab } from './script-store'
 
 function Folder({ name, files, cur, onOpen, initial = true }: { name: string; files: string[]; cur: string; onOpen: (f: string) => void; initial?: boolean }) {
@@ -41,6 +42,7 @@ function Folder({ name, files, cur, onOpen, initial = true }: { name: string; fi
 
 export function Script() {
   const s = useScript()
+  const exe = useMcp((m) => m.status?.stdio.replace(/ --mcp-stdio$/, '') ?? 'Oscillo')
   const [newOpen, setNewOpen] = useState(false)
   const code = s.files[s.cur] ?? ''
   const lines = code.split('\n')
@@ -131,8 +133,8 @@ export function Script() {
         </Grid2>
       </PanelSection>
       <PanelSection title="Run from Terminal" className="shadow-none">
-        <p className="m-0 text-[13px] leading-[18px] text-gray-900">Runs the open script without the app, with the options above.</p>
-        <Snippet text={`oscillo --script ${s.cur}${s.sandbox === 'Isolated' ? '' : s.sandbox === 'Allow Files' ? ' --allow-files' : ' --allow-net'}${s.timeout === '30 s' ? '' : s.timeout === 'None' ? ' --timeout 0' : ' --timeout 300'}`} />
+        <p className="m-0 text-[13px] leading-[18px] text-gray-900">Runs the open script without the window, with the options above. Scripts are saved to Documents/Oscillo/Scripts.</p>
+        <Snippet text={`${exe} --script ${s.cur}${s.sandbox === 'Allow Network' ? ' --allow-net' : s.sandbox === 'Allow Files' ? ' --allow-files' : ''}${s.timeout === '30 s' ? '' : s.timeout === 'None' ? ' --timeout 0' : ' --timeout 300'}`} />
       </PanelSection>
     </>
   )
