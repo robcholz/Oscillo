@@ -103,16 +103,19 @@ function lookup(s: Series, xv: number): { y: number; x: number } | null {
 export function Plot({ x, y, series, height = 'calc(380px + max(0px, (100vh - 900px) * 0.75))', probe = 'x', ariaLabel, overlay, y2, className, onClick }: PlotProps) {
   const host = useRef<HTMLDivElement>(null)
   const [hover, setHover] = useState<{ fx: number; fy: number; w: number; h: number } | null>(null)
-  const xd = x.divisions ?? 10
-  const yd = y.divisions ?? 10
+  // Log axes put one division per decade, so gridlines and labels land on 10, 100, 1 k….
+  const decades = (a: Axis) => Math.max(1, Math.round(Math.log10(a.max / a.min)))
+  const xd = x.divisions ?? (x.log ? decades(x) : 10)
+  const yd = y.divisions ?? (y.log ? decades(y) : 10)
+  const minor = (a: Axis, n: number) => (a.log && n <= 8 ? Array.from({ length: n }, (_, d) => [2, 3, 4, 5, 6, 7, 8, 9].map((k) => (d + Math.log10(k)) / n)).flat() : [])
   const visible = series.filter((s) => !s.hidden)
   const paths = useMemo(() => visible.map((s) => (s.kind === 'bars' ? null : seriesPath(s, x, y))), [visible, x, y])
 
   const yLabels = Array.from({ length: yd + 1 }, (_, i) => {
-    const v = y.max - (i / yd) * (y.max - y.min)
+    const v = y.log ? fromFrac(1 - i / yd, y) : y.max - (i / yd) * (y.max - y.min)
     return { pct: (i / yd) * 100, text: y.format ? y.format(v) : tick(v, y.unit, i === 0 || i === yd), edge: i === 0 ? 'top' : i === yd ? 'bottom' : 'mid' }
   })
-  const xn = xd > 5 ? 5 : xd
+  const xn = x.log ? xd : xd > 5 ? 5 : xd
   const xVals = Array.from({ length: xn + 1 }, (_, i) => fromFrac(i / xn, x))
   const xTicks = x.format ? xVals.map(x.format) : x.log ? xVals.map((v, i) => tick(v, x.unit, i === 0 || i === xn)) : axisTicks(xVals, x.unit)
 
@@ -166,6 +169,12 @@ export function Plot({ x, y, series, height = 'calc(380px + max(0px, (100vh - 90
             const px = ((i + 1) / xd) * W
             return <line key={'x' + i} x1={px} x2={px} y1={0} y2={H} stroke={i + 1 === xd / 2 ? 'var(--gray-alpha-400)' : 'var(--gray-alpha-200)'} vectorEffect="non-scaling-stroke" />
           })}
+          {minor(x, xd).map((f, i) => (
+            <line key={'mx' + i} x1={f * W} x2={f * W} y1={0} y2={H} stroke="var(--gray-alpha-100)" vectorEffect="non-scaling-stroke" />
+          ))}
+          {minor(y, yd).map((f, i) => (
+            <line key={'my' + i} y1={H - f * H} y2={H - f * H} x1={0} x2={W} stroke="var(--gray-alpha-100)" vectorEffect="non-scaling-stroke" />
+          ))}
           {Array.from({ length: yd - 1 }, (_, i) => {
             const py = ((i + 1) / yd) * H
             return <line key={'y' + i} y1={py} y2={py} x1={0} x2={W} stroke={i + 1 === yd / 2 ? 'var(--gray-alpha-400)' : 'var(--gray-alpha-200)'} vectorEffect="non-scaling-stroke" />

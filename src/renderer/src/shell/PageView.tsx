@@ -5,11 +5,15 @@ import { pageById, type PageId } from '../routes'
 import { useStore } from '../store'
 import { DMM } from '../views/DMM'
 import { Logic } from '../views/Logic'
+import { Impedance } from '../views/Impedance'
+import { Network } from '../views/Network'
 import { Patterns } from '../views/Patterns'
 import { Protocol } from '../views/Protocol'
 import { StaticIO } from '../views/StaticIO'
+import { Tracer } from '../views/Tracer'
 import { Logger } from '../views/Logger'
 import { Scope } from '../views/Scope'
+import { Spectrum } from '../views/Spectrum'
 import { Supplies } from '../views/Supplies'
 import { Voltmeter } from '../views/Voltmeter'
 import { Wavegen } from '../views/Wavegen'
@@ -24,7 +28,11 @@ const views: Partial<Record<PageId, ComponentType>> = {
   logic: Logic,
   patterns: Patterns,
   'static-io': StaticIO,
-  protocol: Protocol
+  protocol: Protocol,
+  spectrum: Spectrum,
+  network: Network,
+  impedance: Impedance,
+  tracer: Tracer
 }
 
 export function PageView() {

@@ -3,6 +3,7 @@ import { axisTicks, si } from '../src/renderer/src/components/format'
 import { parseSi } from '../src/renderer/src/components/UnitInput'
 import { check, compile } from '../src/renderer/src/sim/expr'
 import { spectrum } from '../src/renderer/src/sim/dsp'
+import { analyze, metrics, testSignal } from '../src/renderer/src/sim/spectrum'
 import { capture as logicCapture, decodeBus, decodeSpi, decodeUart, MOSI_BYTES, pulseStats } from '../src/renderer/src/sim/logic'
 
 describe('math formulas', () => {
@@ -66,5 +67,23 @@ describe('logic decoders', () => {
   it('merges equal bus values', () => {
     const f = decodeBus(c.signals, ['SCK', 'MOSI', 'MISO', 'CS'])
     for (let i = 1; i < f.length; i++) expect(f[i].text).not.toBe(f[i - 1].text)
+  })
+})
+
+describe('spectrum metrics', () => {
+  const fs = 10000
+  const s = analyze(testSignal(16384, fs, 0.1), fs, 'Flat Top')
+  const m = metrics(s)
+  it('finds the 1 kHz fundamental at −3 dBV', () => {
+    expect(m.fundamental.f).toBeCloseTo(1000, -1)
+    expect(m.fundamental.dbv).toBeCloseTo(-3.01, 1)
+  })
+  it('reads the second harmonic near −64 dBV', () => {
+    expect(m.harmonics[0].dbv).toBeGreaterThan(-66)
+    expect(m.harmonics[0].dbv).toBeLessThan(-62)
+  })
+  it('gives sensible SNR and ENOB', () => {
+    expect(m.snr).toBeGreaterThan(60)
+    expect(m.enob).toBeGreaterThan(8)
   })
 })
