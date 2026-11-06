@@ -1,0 +1,40 @@
+{
+  "name": "@robcholz/geist",
+  "version": "0.1.0",
+  "description": "Geist design system components, color tokens and fonts for Finn's macOS apps.",
+  "private": true,
+  "type": "module",
+  "author": "Finn Sheng",
+  "sideEffects": ["*.css", "./src/focus-modality.ts"],
+  "exports": {
+    ".": "./src/index.ts",
+    "./focus-modality": "./src/focus-modality.ts",
+    "./styles.css": "./styles/index.css",
+    "./tokens.css": "./styles/tokens.css",
+    "./tokens.json": "./tokens/tokens.json",
+    "./fonts/*": "./fonts/*"
+  },
+  "files": ["src", "styles", "fonts", "tokens"],
+  "scripts": {
+    "tokens": "node scripts/gen-tokens.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "clsx": "^2.1.1",
+    "cmdk": "^1.1.1",
+    "radix-ui": "^1.8.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwindcss": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "clsx": "^2.1.1",
+    "cmdk": "^1.1.1",
+    "radix-ui": "^1.8.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "typescript": "^5.9.3"
+  }
+}

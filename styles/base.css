@@ -1,0 +1,95 @@
+/* Base styles every Geist app needs: page colours and type, the keyboard-only focus ring,
+   the values tokens.json doesn't hold, and scrollbars. Imported by styles/index.css. */
+
+@layer base {
+  body {
+    margin: 0;
+    background: var(--background-100);
+    color: var(--gray-1000);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* Programmatic and keyboard scrolls glide (macOS already gives the wheel and trackpad momentum).
+     Opt out with scroll-auto where following fast output must stay instant. */
+  @media (prefers-reduced-motion: no-preference) {
+    * {
+      scroll-behavior: smooth;
+    }
+  }
+  /* Focus, as on vercel.com/geist: the blue focus ring on buttons and links, only after keyboard use
+     (see src/focus-modality.ts); fields draw the gray focus border themselves. */
+  :focus-visible {
+    outline: none;
+  }
+  :where([data-modality='keyboard']) :where(button, a[href]):focus-visible {
+    box-shadow: var(--shadow-focus-ring);
+  }
+  /* Toggles ring the track, not the label beside it. */
+  :where([data-modality='keyboard']) [role='switch']:focus-visible {
+    box-shadow: none;
+  }
+  :where([data-modality='keyboard']) [role='switch']:focus-visible > [data-toggle-track] {
+    box-shadow: var(--shadow-focus-ring);
+  }
+  /* List rows with a radio dot ring the dot; a ring on the square row would be clipped by its list. */
+  :where([data-modality='keyboard']) [role='radio']:has(> [data-radio-dot]):focus-visible {
+    box-shadow: none;
+  }
+  :where([data-modality='keyboard']) [role='radio']:focus-visible > [data-radio-dot] {
+    outline: 2px solid var(--blue-900);
+    outline-offset: 2px;
+  }
+}
+
+/* Keyboard focus ring for components whose own shadow would otherwise win over the base rule. */
+@custom-variant kbd-focus (&:where([data-modality='keyboard'] *):focus-visible);
+@custom-variant group-kbd-focus (&:where([data-modality='keyboard'] .group:focus-visible *));
+
+/* Geist values that are not in tokens.json (measured on vercel.com/geist). */
+:root,
+:root[data-theme='dark'] {
+  --button-primary-hover: #cccccc;
+  --overlay: rgb(0 0 0 / 0.8);
+  --toggle-knob: rgb(237 237 237 / 0.84);
+}
+:root[data-theme='light'] {
+  --button-primary-hover: #383838;
+  --overlay: rgb(242 242 242 / 0.8);
+  --toggle-knob: #ffffff;
+}
+
+@keyframes geist-spinner {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.15;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 9999px;
+  background: var(--gray-alpha-400) padding-box;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+@keyframes geist-blink {
+  0% {
+    opacity: 0.2;
+  }
+  20% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.2;
+  }
+}
