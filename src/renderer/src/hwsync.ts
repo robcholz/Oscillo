@@ -1,13 +1,13 @@
-// Keeps real hardware in step with the instrument settings, and polls what the device reports back.
-// The Demo Device keeps the renderer's own simulations; everything here runs only on real hardware,
-// except the monitor (temperature, USB power), which the simulated device answers too.
+// Keeps the connected device in step with the instrument settings, and polls what it reports back.
+// The Demo Device is a simulated device in the main process (libs/dwf/src/sim.ts), so it takes the
+// same path as real hardware: nothing in the renderer knows it is simulated.
 import { useEffect, useRef, useState } from 'react'
 import { create } from 'zustand'
 import type { Monitor, ScopeReply, ScopeRequest, WaveRequest } from '../../shared/hw'
 import { deviceById, hw } from './devices'
 import { useStore } from './store'
-import type { WaveType } from './sim/wave'
-import type { Complex } from './sim/network'
+import type { WaveType } from '../../shared/dsp/wave'
+import type { Complex } from '../../shared/dsp/network'
 import type { Reading } from './views/meters'
 
 interface HwLive {
@@ -19,11 +19,8 @@ interface HwLive {
 }
 export const useHwLive = create<HwLive>()(() => ({ meters: null, monitor: null, dio: null }))
 
-/** True when the connected device is real hardware (not the Demo Device). */
-export const isHardware = (): boolean => {
-  const d = deviceById(useStore.getState().device)
-  return !!hw && !!d && d.link !== 'SIM'
-}
+/** True when a device is connected. */
+export const connected = (): boolean => !!hw && !!deviceById(useStore.getState().device)
 
 const FUNC: Partial<Record<WaveType, WaveRequest['func']>> = {
   Sine: 'Sine',
@@ -143,9 +140,8 @@ export function startHwSync(): void {
     busy = true
     try {
       const monitor = await hw!.monitor().catch(() => null)
-      const real = isHardware()
-      const dio = real ? await hw!.dioRead().catch(() => null) : null
-      const meters = real && meterUsers > 0 && app.running ? await measure().catch(() => null) : null
+      const dio = await hw!.dioRead().catch(() => null)
+      const meters = meterUsers > 0 && app.running ? await measure().catch(() => null) : null
       useHwLive.setState({ monitor, dio, meters })
     } finally {
       busy = false
@@ -160,7 +156,7 @@ export const resync = (): void => resyncs.forEach((f) => f())
 type Sub = { subscribe: (fn: () => void) => () => void }
 /**
  * Pushes `read()` to the device with `push` whenever it changes, and again after connecting, while
- * real hardware is connected. Failures show as a toast.
+ * a device is connected. Failures show as a toast.
  */
 export function follow<T>(stores: Sub[], read: () => T, push: (v: T) => Promise<void>, what: string): void {
   if (!hw) return
@@ -172,7 +168,7 @@ export function follow<T>(stores: Sub[], read: () => T, push: (v: T) => Promise<
       dev = app.device
       last = ''
     }
-    if (!isHardware()) return
+    if (!connected()) return
     const v = read()
     const key = JSON.stringify(v)
     if (key === last) return
@@ -257,7 +253,7 @@ export async function respond(f: number, st: Stimulus): Promise<[Complex, Comple
 }
 
 /**
- * Sweeps `freqs` on real hardware while `run`, restarting when done, like the analyzers' own sweep.
+ * Sweeps `freqs` on the device while `run`, restarting when done, like the analyzers' own sweep.
  * `fn` turns each frequency into a point. When the sweep stops, the generator goes back to its
  * Wavegen settings.
  */

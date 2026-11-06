@@ -1,5 +1,4 @@
-// Simulated digital captures for the Logic Analyzer: an SPI transfer on DIO 0–3 and a UART exchange
-// on DIO 4–5, stored as edge lists, plus real decoders that read those edges back.
+// Logic Analyzer signals as edge lists, built from device captures, and the decoders that read them.
 
 export interface DigitalSignal {
   /** Level at t = 0. */
@@ -21,17 +20,6 @@ export interface Frame {
 export const CAPTURE = { rate: 100e6, samples: 16384 }
 export const DURATION = CAPTURE.samples / CAPTURE.rate
 
-function build(init: 0 | 1, changes: [number, 0 | 1][]): DigitalSignal {
-  const edges: number[] = []
-  let level = init
-  for (const [t, v] of changes.sort((a, b) => a[0] - b[0]))
-    if (v !== level) {
-      edges.push(t)
-      level = v
-    }
-  return { init, edges }
-}
-
 export function levelAt(s: DigitalSignal, t: number): 0 | 1 {
   let n = 0
   for (const e of s.edges) {
@@ -41,76 +29,29 @@ export function levelAt(s: DigitalSignal, t: number): 0 | 1 {
   return (n % 2 ? 1 - s.init : s.init) as 0 | 1
 }
 
-/** Seeded random so a capture index always looks the same. */
-function rng(seed: number) {
-  let x = seed * 2654435761 || 1
-  return () => {
-    x ^= x << 13
-    x ^= x >>> 17
-    x ^= x << 5
-    return ((x >>> 0) % 10000) / 10000
-  }
-}
-
-const us = 1e-6
-const SPI_T = 5 * us
-const BAUD_T = 4 * us
-
-function uart(chars: { c: number; at: number }[]): DigitalSignal {
-  const ch: [number, 0 | 1][] = []
-  for (const { c, at } of chars) {
-    ch.push([at, 0])
-    for (let b = 0; b < 8; b++) ch.push([at + (b + 1) * BAUD_T, ((c >> b) & 1) as 0 | 1])
-    ch.push([at + 9 * BAUD_T, 1])
-  }
-  return build(1, ch)
-}
-
-export interface Capture {
-  index: number
-  signals: Record<string, DigitalSignal>
-}
-
-export const MOSI_BYTES = [0xa5, 0x3c, 0xf0, 0x0f]
-
-export function capture(index: number): Capture {
-  const r = rng(index + 7)
-  const miso = [0xff, 0x00, Math.floor(r() * 256), Math.floor(r() * 256)]
-  const t0 = 2.4 * us + r() * 0.2 * us
-  const sck: [number, 0 | 1][] = []
-  const mosi: [number, 0 | 1][] = []
-  const misoCh: [number, 0 | 1][] = []
-  for (let k = 0; k < 32; k++) {
-    const t = t0 + k * SPI_T
-    const bit = 7 - (k % 8)
-    const byte = Math.floor(k / 8)
-    mosi.push([t, ((MOSI_BYTES[byte] >> bit) & 1) as 0 | 1])
-    misoCh.push([t, ((miso[byte] >> bit) & 1) as 0 | 1])
-    sck.push([t + SPI_T / 2, 1], [t + SPI_T, 0])
-  }
-  const j = (r() - 0.5) * 2 * us
-  return {
-    index,
-    signals: {
-      SCK: build(0, sck),
-      MOSI: build(0, mosi),
-      MISO: build(0, misoCh),
-      CS: build(1, [
-        [t0 - 0.4 * us, 0],
-        [t0 + 32 * SPI_T + 0.4 * us, 1]
-      ]),
-      TX: uart([
-        { c: 0x41, at: 6 * us + j },
-        { c: 0x54, at: 100 * us + j }
-      ]),
-      RX: uart([
-        { c: 0x4f, at: 19.6 * us + j },
-        { c: 0x4b, at: 67.1 * us + j },
-        { c: 0x0d, at: 115 * us + j }
-      ])
+/** Edge lists for each named pin of a capture (one word per sample, bit n = DIO n). */
+export function toSignals(data: ArrayLike<number>, rate: number, pins: Record<string, number>): Record<string, DigitalSignal> {
+  const out: Record<string, DigitalSignal> = {}
+  for (const [id, pin] of Object.entries(pins)) {
+    if (pin < 0) continue
+    const bit = (w: number) => ((w >> pin) & 1) as 0 | 1
+    const init = bit(data[0] ?? 0)
+    const edges: number[] = []
+    let level = init
+    for (let i = 1; i < data.length; i++) {
+      const b = bit(data[i])
+      if (b !== level) {
+        edges.push(i / rate)
+        level = b
+      }
     }
+    out[id] = { init, edges }
   }
+  return out
 }
+
+const SPI_T = 5e-6
+const BAUD_T = 4e-6
 
 const hex = (v: number, digits = 2) => '0x' + v.toString(16).toUpperCase().padStart(digits, '0')
 const chr = (v: number) => (v === 13 ? "'\\r'" : v === 10 ? "'\\n'" : v >= 32 && v < 127 ? `'${String.fromCharCode(v)}'` : hex(v))

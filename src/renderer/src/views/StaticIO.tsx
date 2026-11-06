@@ -2,12 +2,10 @@
 // output shown as a slider, progress bar, bits or 7-segment digits.
 import { Button, Description, Material, Note, Progress, Select, Slider, StatusDot, Toggle } from '@robcholz/geist'
 import { CircleDot, Minus, Plus, RefreshCw } from 'lucide-react'
-import { useState } from 'react'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { PageBar, ScrollPage } from '../components/Page'
-import { useInterval } from '../components/useInterval'
-import { follow, isHardware, pushDio, useHwLive } from '../hwsync'
+import { follow, pushDio, useHwLive } from '../hwsync'
 import { useStore } from '../store'
 
 type Widget = 'LED' | 'Button' | 'Switch'
@@ -79,12 +77,8 @@ export function StaticIO() {
   const pressed = s.pressed
   const setPressed = (pressed: number | null) => s.set({ pressed })
   const dio = useHwLive((h) => h.dio)
-  const real = isHardware()
-  const [t, setT] = useState(0)
-  useInterval(() => setT((x) => x + 1), 250, live)
-
-  // Inputs: the device's pin levels on real hardware; on the Demo Device, a slow counter.
-  const inputs = real ? (dio ?? 0) & 0xff : (t >> 2) & 0xff
+  // Inputs: the pin levels the device reports.
+  const inputs = (dio ?? 0) & 0xff
   const level = (i: number) => {
     const w = s.widgets[i]
     if (w === 'LED') return live ? (inputs >> i) & 1 : 0

@@ -7,8 +7,8 @@ import { persist } from 'zustand/middleware'
 import { PageBar, ScrollPage } from '../components/Page'
 import { UnitInput } from '../components/UnitInput'
 import { fixed } from '../components/format'
-import { jitter, useInterval } from '../components/useInterval'
-import { follow, isHardware, pushSupplies, useHwLive } from '../hwsync'
+import { useInterval } from '../components/useInterval'
+import { follow, pushSupplies, useHwLive } from '../hwsync'
 import { useStore } from '../store'
 
 interface Rail {
@@ -35,29 +35,19 @@ export const useSupplies = create<SupplyState>()(
   )
 )
 
-/** Simulated load: 47 Ω on each rail, limited by the current limit. */
-const LOAD = 47
 const USB_LIMIT = 2.5
 const IDLE_W = 0.62
 
-// Real hardware follows the switches and setpoints.
+// The device follows the switches and setpoints.
 follow([useSupplies], () => { const { master, pos, neg } = useSupplies.getState(); return { master, pos, neg } }, pushSupplies, 'the supplies')
 
-/** What a rail measures: from the device's monitor on real hardware, else the simulated load. */
+/** What a rail measures, from the device's monitor. */
 function reading(r: Rail, live: boolean, side: 'pos' | 'neg') {
-  if (!live || !r.on) return { v: 0, i: 0, limited: false }
-  const mon = isHardware() ? useHwLive.getState().monitor : null
-  if (mon) {
-    const m = mon[side]
-    const v = Number.isFinite(m.volts) ? m.volts : 0
-    const i = Number.isFinite(m.amps) ? Math.abs(m.amps) : 0
-    return { v, i, limited: i >= r.limit * 0.98 }
-  }
-  const want = Math.abs(r.volts) / LOAD
-  const limited = want > r.limit
-  const i = Math.min(want, r.limit)
-  const v = limited ? Math.sign(r.volts) * i * LOAD : r.volts
-  return { v: v + jitter(0.002), i: i + jitter(0.0004), limited }
+  const m = useHwLive.getState().monitor?.[side]
+  if (!live || !r.on || !m) return { v: 0, i: 0, limited: false }
+  const v = Number.isFinite(m.volts) ? m.volts : 0
+  const i = Number.isFinite(m.amps) ? Math.abs(m.amps) : 0
+  return { v, i, limited: i >= r.limit * 0.98 }
 }
 
 function RailCard({ name, rail, live, sign, onChange }: { name: string; rail: Rail; live: boolean; sign: 1 | -1; onChange: (r: Partial<Rail>) => void }) {
@@ -106,7 +96,7 @@ export function Supplies() {
   const p = reading(s.pos, live, 'pos')
   const n = reading(s.neg, live, 'neg')
   const usb = useHwLive((h) => h.monitor?.usb)
-  const measured = isHardware() && !!usb && Number.isFinite(usb.volts) && Number.isFinite(usb.amps)
+  const measured = !!usb && Number.isFinite(usb.volts) && Number.isFinite(usb.amps)
   const total = measured ? usb.volts * usb.amps : IDLE_W + Math.abs(p.v * p.i) + Math.abs(n.v * n.i)
   const pct = Math.min(100, Math.round((total / USB_LIMIT) * 100))
 

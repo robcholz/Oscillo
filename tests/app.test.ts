@@ -1,10 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { axisTicks, si } from '../src/renderer/src/components/format'
 import { parseSi } from '../src/renderer/src/components/UnitInput'
-import { check, compile } from '../src/renderer/src/sim/expr'
-import { spectrum } from '../src/renderer/src/sim/dsp'
-import { analyze, metrics, testSignal } from '../src/renderer/src/sim/spectrum'
-import { capture as logicCapture, decodeBus, decodeSpi, decodeUart, MOSI_BYTES, pulseStats } from '../src/renderer/src/sim/logic'
+import { check, compile } from '../src/shared/dsp/expr'
+import { spectrum } from '../src/shared/dsp/dsp'
+import { analyze, metrics } from '../src/shared/dsp/spectrum'
+import { decodeBus, decodeSpi, decodeUart, pulseStats, toSignals, type DigitalSignal } from '../src/shared/dsp/logic'
+import { Dwf, createSimDwf } from '../libs/dwf/src'
+import { SPI_MOSI } from '../libs/dwf/src/sim-board'
 
 describe('math formulas', () => {
   it('evaluates with precedence and functions', () => {
@@ -52,29 +54,42 @@ describe('spectrum', () => {
   })
 })
 
+// The decoders read a capture of the Demo Device's board, through the same SDK path as hardware.
 describe('logic decoders', () => {
-  const c = logicCapture(1)
+  let c: Record<string, DigitalSignal> = {}
+  beforeAll(async () => {
+    const dev = new Dwf(createSimDwf({ noise: 0 })).open(0)
+    // Trigger on CS falling, early in the record, so the whole transfer fits.
+    const r = await dev.logic.single({ rate: 100e6, samples: 16384, trigger: { rise: [], fall: [3], position: 0.01, autoTimeout: 0 } })
+    dev.close()
+    c = toSignals(r.data, r.rate, { SCK: 0, MOSI: 1, MISO: 2, CS: 3, TX: 4, RX: 5 })
+  })
   it('decodes the SPI bytes that were sent', () => {
-    expect(decodeSpi(c.signals).map((f) => f.mo)).toEqual(MOSI_BYTES.map((b) => '0x' + b.toString(16).toUpperCase().padStart(2, '0')))
+    expect(decodeSpi(c).map((f) => f.mo)).toEqual(SPI_MOSI.map((b) => '0x' + b.toString(16).toUpperCase().padStart(2, '0')))
   })
   it('decodes UART characters', () => {
-    expect(decodeUart(c.signals.RX).map((f) => f.text)).toEqual(["'O'", "'K'", "'\\r'"])
-    expect(decodeUart(c.signals.TX).map((f) => f.text)).toEqual(["'A'", "'T'"])
+    expect(decodeUart(c.RX).map((f) => f.text)).toEqual(["'O'", "'K'", "'\\r'"])
+    expect(decodeUart(c.TX).map((f) => f.text)).toEqual(["'A'", "'T'"])
   })
   it('measures the SPI clock', () => {
-    const p = pulseStats(c.signals.SCK)!
-    expect(p.period).toBeCloseTo(5e-6, 9)
-    expect(p.width).toBeCloseTo(2.5e-6, 9)
+    const p = pulseStats(c.SCK)!
+    expect(p.period).toBeCloseTo(5e-6, 7)
+    expect(p.width).toBeCloseTo(2.5e-6, 7)
   })
   it('merges equal bus values', () => {
-    const f = decodeBus(c.signals, ['SCK', 'MOSI', 'MISO', 'CS'])
+    const f = decodeBus(c, ['SCK', 'MOSI', 'MISO', 'CS'])
     for (let i = 1; i < f.length; i++) expect(f[i].text).not.toBe(f[i - 1].text)
   })
 })
 
 describe('spectrum metrics', () => {
   const fs = 10000
-  const s = analyze(testSignal(16384, fs, 0.1), fs, 'Flat Top')
+  // 1 kHz, 1 V peak with small harmonics and a little noise.
+  const h = [0, 1, 0.00087, 0.00045, 0.00024]
+  let seed = 7
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
+  const x = Float64Array.from({ length: 16384 }, (_, i) => h.reduce((v, a, k) => v + a * Math.sin(2 * Math.PI * 1000 * k * (i / fs) + 0.6 * k), 0) + (rnd() - 0.5) * 0.0012)
+  const s = analyze(x, fs, 'Flat Top')
   const m = metrics(s)
   it('finds the 1 kHz fundamental at −3 dBV', () => {
     expect(m.fundamental.f).toBeCloseTo(1000, -1)

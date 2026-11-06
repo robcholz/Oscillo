@@ -9,10 +9,10 @@ import { persist } from 'zustand/middleware'
 import { LabeledInput, LabeledSelect, PageBar, ScrollPage } from '../components/Page'
 import { Plot } from '../components/Plot'
 import { UnitInput } from '../components/UnitInput'
-import { samples, type WaveType } from '../sim/wave'
+import { samples, type WaveType } from '../../../shared/dsp/wave'
 import { follow, pushWave } from '../hwsync'
 import { openTable } from '../files'
-import { compile as compileExpr } from '../sim/expr'
+import { compile as compileExpr } from '../../../shared/dsp/expr'
 import { useStore } from '../store'
 
 const TYPES = [

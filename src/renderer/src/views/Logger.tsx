@@ -9,10 +9,10 @@ import { fixed } from '../components/format'
 import { Grid2, LabeledInput, LabeledSelect, PageBar, PanelSection, SplitPage } from '../components/Page'
 import { Plot, type Series } from '../components/Plot'
 import { UnitInput } from '../components/UnitInput'
-import { jitter, useInterval } from '../components/useInterval'
+import { useInterval } from '../components/useInterval'
 import { publish, saveTable, type Table as DataTable } from '../files'
 import { useStore } from '../store'
-import { isHardware, wantMeters } from '../hwsync'
+import { wantMeters } from '../hwsync'
 import { readChannel } from './meters'
 
 const HISTORY = ['1 Minute', '10 Minutes', '1 Hour', 'Unlimited'] as const
@@ -73,24 +73,9 @@ interface Point {
 }
 
 function sample(c: LogCh): number {
-  const r = readChannel(c.src === 'C1' ? 0 : 1, 0.004)
+  const r = readChannel(c.src === 'C1' ? 0 : 1)
   const base = c.fn === 'DC' ? r.dc : c.fn === 'AC RMS' ? r.ac : r.rms
   return base + c.offset
-}
-
-const clampFn = (c: LogCh, v: number) => (c.fn === 'DC' || c.fn === 'Formula' ? v : Math.abs(v))
-
-/** Seed ten minutes of slowly drifting history so the Demo Device's plot is not empty on first open. */
-function seed(channels: LogCh[]): Point[] {
-  if (isHardware()) return []
-  const now = Date.now()
-  const pts: Point[] = []
-  const base = Object.fromEntries(channels.map((c) => [c.id, sample(c)]))
-  for (let i = 600; i > 0; i -= 2) {
-    const t = now - i * 1000
-    pts.push({ t, v: Object.fromEntries(channels.map((c, k) => [c.id, clampFn(c, base[c.id] + 0.06 * Math.sin(i / (90 + k * 40)) + jitter(0.01))])) })
-  }
-  return pts
 }
 
 let memory: Point[] | null = null
@@ -98,7 +83,7 @@ let memory: Point[] | null = null
 export function Logger() {
   const s = useLogger()
   const app = useStore()
-  const [pts, setPts] = useState<Point[]>(() => (memory ??= seed(s.channels)))
+  const [pts, setPts] = useState<Point[]>(() => (memory ??= []))
   const [dialog, setDialog] = useState<null | { title: string; fields: FormField[]; submitLabel: string; onSubmit: (v: Record<string, string>) => void }>(null)
   const live = s.running && app.running && !!app.device
   const logTable = (): DataTable => {

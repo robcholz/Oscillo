@@ -106,9 +106,66 @@ describe('simulated Analog Discovery 3', () => {
     dev.close()
   })
 
+  it('high-passes wavegen 1 into scope 2 through the board RC (corner 1.59 kHz)', async () => {
+    const dev = sim().open(0)
+    const gain = async (f: number): Promise<number> => {
+      dev.wavegen.set(0, { func: 'Sine', frequency: f, amplitude: 1 })
+      dev.wavegen.start(0)
+      const { data } = await dev.scope.single({ channels: [0, 1], rate: f * 100, samples: 2000 })
+      return (Math.max(...data[1]) - Math.min(...data[1])) / (Math.max(...data[0]) - Math.min(...data[0]))
+    }
+    expect(await gain(1 / (2 * Math.PI * 1e-4))).toBeCloseTo(Math.SQRT1_2, 2)
+    expect(await gain(100)).toBeLessThan(0.07)
+    expect(await gain(100e3)).toBeGreaterThan(0.99)
+    dev.close()
+  })
+
+  it('records the board microcontroller on the logic analyzer, triggered on CS', async () => {
+    const dev = sim().open(0)
+    const { rate, data } = await dev.logic.single({ rate: 100e6, samples: 16384, trigger: { rise: [], fall: [3], position: 0.01, autoTimeout: 0 } })
+    expect(rate).toBe(100e6)
+    const at = Math.round(16384 * 0.01)
+    expect((data[at - 1] >> 3) & 1).toBe(1)
+    expect((data[at] >> 3) & 1).toBe(0)
+    // 32 SCK rising edges while CS is low.
+    let rises = 0
+    for (let i = 1; i < data.length; i++) if (data[i] & 1 && !(data[i - 1] & 1) && !(data[i] & 8)) rises++
+    expect(rises).toBe(32)
+    dev.close()
+  })
+
+  it('plays patterns that the logic analyzer reads back', async () => {
+    const dev = sim().open(0)
+    dev.patterns.start([{ pin: 7, kind: 'Clock', frequency: 1e6, duty: 25 }])
+    const { data } = await dev.logic.single({ rate: 100e6, samples: 1000 })
+    const high = data.reduce((n, w) => n + ((w >> 7) & 1), 0)
+    expect(high).toBe(250)
+    dev.patterns.stop()
+    dev.close()
+  })
+
+  it('answers the protocol masters', () => {
+    const dev = sim().open(0)
+    const p = dev.protocols
+    p.uartSetup({ tx: 4, rx: 5, baud: 115200 })
+    p.uartSend([0x68, 0x69])
+    expect(p.uartReceive().data).toEqual([0x68, 0x69])
+    p.i2cSetup({ scl: 6, sda: 7, rate: 100e3 })
+    expect(p.i2cTransfer(0x50, [0x10, 1, 2, 3], 0).nak).toBe(0)
+    expect(p.i2cTransfer(0x50, [0x10], 3).data).toEqual([1, 2, 3])
+    const t = p.i2cTransfer(0x48, [0], 2).data
+    expect(((t[0] << 4) | (t[1] >> 4)) * 0.0625).toBeCloseTo(23.5, 0)
+    expect(p.i2cTransfer(0x21, [0], 1).nak).not.toBe(0)
+    p.canSetup({ tx: 8, rx: 9, rate: 500e3 })
+    p.canSend({ id: 0x120, extended: false, remote: false, data: [1, 2] })
+    expect(p.canReceive()).toEqual({ id: 0x121, extended: false, remote: false, data: [1, 2] })
+    expect(p.canReceive()).toBeNull()
+    dev.close()
+  })
+
   it('fails unmodelled functions as not supported', () => {
     const raw = createSimDwf()
-    expect(raw.FDwfDigitalCanReset(1)).toBe(0)
+    expect(raw.FDwfAnalogImpedanceReset(1)).toBe(0)
     const code = new Int32Array(1)
     raw.FDwfGetLastError(code)
     expect(code[0]).toBe(dwf.dwfercNotSupported)

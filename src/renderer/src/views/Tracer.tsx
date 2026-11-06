@@ -9,8 +9,7 @@ import { si } from '../components/format'
 import { Grid2, LabeledSelect, PageBar, PanelSection, SplitPage } from '../components/Page'
 import { Plot, type Series } from '../components/Plot'
 import { UnitInput } from '../components/UnitInput'
-import { jitter, useInterval } from '../components/useInterval'
-import { hw, useHardware } from '../devices'
+import { hw } from '../devices'
 import { resync } from '../hwsync'
 import { useStore } from '../store'
 
@@ -39,11 +38,8 @@ const useTracer = create<TracerState>()(
   })
 )
 
-/** Collector current: β·IB with saturation below ~0.2 V and the Early effect (VA = 80 V). */
-const ic = (vce: number, ib: number) => 180 * ib * (1 - Math.exp(-vce / 0.08)) * (1 + vce / 80)
 /** Largest |I| in the measured curves, at least `min`, with headroom. */
 const peak = (c: Float64Array[] | null, min: number) => Math.max(min, ...(c ?? []).map((x) => x.reduce((m, v) => Math.max(m, Math.abs(v)), 0))) * 1.15
-const diode = (v: number) => 1e-12 * (Math.exp(v / (1.8 * 0.02585)) - 1)
 
 /** Bins a captured V–I loop into n points across 0…vmax (or −vmax…0), averaging each bin. */
 function binIV(v: Float64Array, i: Float64Array, vmax: number, n: number): Float64Array {
@@ -89,13 +85,11 @@ export function Tracer() {
   const app = useStore()
   const [tick, setTick] = useState(0)
   const live = s.running && app.running && !!app.device
-  const real = useHardware()
-  useInterval(() => setTick((t) => t + 1), 500, live && !real)
   const [measured, setMeasured] = useState<Float64Array[] | null>(null)
   const [busy, setBusy] = useState(false)
-  // One trace per tick on real hardware; when tracing stops the generator returns to its settings.
+  // Traces back to back while running, or once for Single (tick < 0); when tracing stops the generator returns to its settings.
   useEffect(() => {
-    if (!real || !(live || tick < 0)) return
+    if (!(live || tick < 0)) return
     let alive = true
     void (async () => {
       try {
@@ -117,7 +111,7 @@ export function Tracer() {
       alive = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [real, live, tick < 0])
+  }, [live, tick])
 
   const N = 200
   const pnp = s.device === 'PNP'
@@ -135,17 +129,17 @@ export function Tracer() {
       unit: 'A',
       hidden: s.hidden.includes(k),
       x: vx,
-      y: real ? (measured?.[k] ?? new Float64Array(N)) : Float64Array.from(vx, (v) => (pnp ? -1 : 1) * ic(Math.abs(v), s.ibStart + k * s.ibStep) * (1 + (live ? jitter(0.004) : 0)))
+      y: measured?.[k] ?? new Float64Array(N)
     }))
-    yMax = real ? peak(measured, 1e-3) : ic(vmax, s.ibStart + (s.steps - 1) * s.ibStep) * 1.15
+    yMax = peak(measured, 1e-3)
   } else if (s.device === 'Diode') {
-    legend = ['1N4148']
-    series = [{ id: 'd', name: real ? 'Diode' : '1N4148', color: COLORS[0], unit: 'A', x: vx, y: real ? (measured?.[0] ?? new Float64Array(N)) : Float64Array.from(vx, (v) => Math.min(0.05, diode(v)) * (1 + (live ? jitter(0.004) : 0))) }]
-    yMax = real ? peak(measured, 1e-3) : 0.05
+    legend = ['Diode']
+    series = [{ id: 'd', name: 'Diode', color: COLORS[0], unit: 'A', x: vx, y: measured?.[0] ?? new Float64Array(N) }]
+    yMax = peak(measured, 1e-3)
   } else {
-    legend = [real ? 'Resistor' : '1 kΩ']
-    series = [{ id: 'r', name: legend[0], color: COLORS[0], unit: 'A', x: vx, y: real ? (measured?.[0] ?? new Float64Array(N)) : Float64Array.from(vx, (v) => (v / 1000) * (1 + (live ? jitter(0.002) : 0))) }]
-    yMax = real ? peak(measured, 1e-3) : vmax / 1000
+    legend = ['Resistor']
+    series = [{ id: 'r', name: legend[0], color: COLORS[0], unit: 'A', x: vx, y: measured?.[0] ?? new Float64Array(N) }]
+    yMax = peak(measured, 1e-3)
   }
   const nice = (v: number) => {
     const p = 10 ** Math.floor(Math.log10(v))
@@ -164,7 +158,7 @@ export function Tracer() {
     <SplitPage
       bar={
         <PageBar title="Curve Tracer" status={<StatusDot state={live || busy ? 'READY' : 'QUEUED'} label={live || busy ? 'Tracing' : 'Stopped'} />}>
-          <Button size="small" type="secondary" prefix={<StepForward size={16} />} onClick={() => { if (!app.device) return app.toast('No device connected', { detail: 'Connect a device, then press Single.' }); s.set({ running: false }); setTick((t) => (real ? -Math.abs(t) - 1 : t + 1)) }}>
+          <Button size="small" type="secondary" prefix={<StepForward size={16} />} onClick={() => { if (!app.device) return app.toast('No device connected', { detail: 'Connect a device, then press Single.' }); s.set({ running: false }); setTick((t) => -Math.abs(t) - 1) }}>
             Single
           </Button>
           <Button size="small" prefix={live ? <Square size={16} /> : <Play size={16} />} onClick={run} tooltipKeys={['Space']}>
@@ -208,11 +202,6 @@ export function Tracer() {
         ariaLabel="IV curves"
         height="calc(460px + max(0px, (100vh - 900px) * 0.8))"
       />
-      {bjt && !real && (
-        <span className="text-[13px] tabular-nums text-gray-900">
-          β ≈ {Math.round(ic(Math.min(2, vmax), s.ibStart) / s.ibStart)} at VCE 2 V · Early voltage ≈ 80 V
-        </span>
-      )}
     </SplitPage>
   )
 }

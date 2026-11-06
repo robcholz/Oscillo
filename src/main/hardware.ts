@@ -108,7 +108,7 @@ export class Hardware {
 
   async scope(r: ScopeRequest, o: { raw?: boolean } = {}): Promise<ScopeReply> {
     const setup: Record<number, { range?: number; offset?: number; filter?: number }> = {}
-    for (const c of r.channels) setup[c] = { range: r.range?.[c], offset: r.offset?.[c], filter: r.filter?.[c] }
+    for (const c of r.channels) setup[c] = { range: r.range?.[c], offset: r.offset?.[c] ?? 0, filter: r.filter?.[c] }
     const next = this.captures.then(() => this.need().scope.single({ channels: r.channels, rate: r.rate, samples: r.samples, setup, trigger: r.trigger, timeout: 5000 }))
     this.captures = next.catch(() => undefined)
     const rep = await next

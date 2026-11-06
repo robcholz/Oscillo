@@ -19,7 +19,7 @@ export interface DeviceInfo {
 
 export const DEMO: DeviceInfo = { id: 'DEMO', name: 'Demo Device', serial: 'Simulated', link: 'SIM', busy: false }
 
-/** The main-process hardware API; null outside Electron (tests). */
+/** The main-process hardware API; null outside Electron (unit tests), where no device is listed. */
 export const hw: HwApi | null = typeof window !== 'undefined' ? (window.oscillo?.hw ?? null) : null
 
 interface DevicesState {
@@ -27,18 +27,13 @@ interface DevicesState {
   status: HwStatus | null
   scanning: boolean
 }
-export const useDevices = create<DevicesState>()(() => ({ list: [DEMO], status: null, scanning: false }))
+export const useDevices = create<DevicesState>()(() => ({ list: hw ? [DEMO] : [], status: null, scanning: false }))
 
 export const deviceById = (id: DeviceId | null): DeviceInfo | null => (id ? (useDevices.getState().list.find((d) => d.id === id) ?? null) : null)
 /** The connected device, kept current as the list refreshes. */
 export const useDevice = (): DeviceInfo | null => {
   const id = useStore((s) => s.device)
   return useDevices((d) => (id ? (d.list.find((x) => x.id === id) ?? null) : null))
-}
-/** True when the connected device is real hardware rather than the Demo Device. */
-export const useHardware = (): boolean => {
-  const d = useDevice()
-  return !!d && d.link !== 'SIM'
 }
 
 /** Device Manager settings: names you gave devices, and how the list stays current. */
@@ -56,7 +51,7 @@ export const useDeviceSettings = create<DeviceSettings>()(
 )
 
 export async function refreshDevices(opts: { quiet?: boolean } = {}): Promise<DeviceInfo[]> {
-  if (!hw) return [DEMO]
+  if (!hw) return []
   if (!opts.quiet) useDevices.setState({ scanning: true })
   try {
     const [status, list] = await Promise.all([hw.status(), hw.devices()])

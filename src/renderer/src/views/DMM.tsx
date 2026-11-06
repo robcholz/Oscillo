@@ -7,8 +7,8 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { LabeledSelect, PageBar, ScrollPage } from '../components/Page'
 import { si } from '../components/format'
-import { jitter, useInterval } from '../components/useInterval'
-import { hw, useDevice, useHardware } from '../devices'
+import { useInterval } from '../components/useInterval'
+import { hw, useDevice } from '../devices'
 import { useStore } from '../store'
 
 const FUNCTIONS = ['DC Voltage', 'AC Voltage', 'DC Current', 'AC Current', 'Resistance', 'Continuity', 'Diode', 'Temperature']
@@ -25,16 +25,16 @@ const rangeOf = (r: string, _unit: string): number => {
   return m ? Number(m[1]) * (m[2] ? 1e-3 : 1) : 0
 }
 
-/** The Demo Device's simulated readings. */
-const truth: Record<string, { v: number; unit: string; noise: number }> = {
-  'DC Voltage': { v: 3.29871, unit: 'V', noise: 0.00004 },
-  'AC Voltage': { v: 1.41402, unit: 'V', noise: 0.0002 },
-  'DC Current': { v: 0.0124, unit: 'A', noise: 0.000002 },
-  'AC Current': { v: 0.00351, unit: 'A', noise: 0.000003 },
-  Resistance: { v: 4698.3, unit: 'Ω', noise: 0.2 },
-  Continuity: { v: 0.82, unit: 'Ω', noise: 0.02 },
-  Diode: { v: 0.6214, unit: 'V', noise: 0.0002 },
-  Temperature: { v: 23.42, unit: '°C', noise: 0.01 }
+/** The unit each function reads in. */
+const UNIT: Record<string, string> = {
+  'DC Voltage': 'V',
+  'AC Voltage': 'V',
+  'DC Current': 'A',
+  'AC Current': 'A',
+  Resistance: 'Ω',
+  Continuity: 'Ω',
+  Diode: 'V',
+  Temperature: '°C'
 }
 
 interface DMMState {
@@ -65,14 +65,13 @@ export function DMM() {
   const [rel, setRel] = useState<number | null>(null)
   const [st, setSt] = useState<Stats>(empty)
   const live = d.running && app.running && !!app.device && !hold
-  const t = truth[d.fn]
+  const unit = UNIT[d.fn]
   const digits = d.res === '5½ Digits' ? 6 : 5
   const stRef = useRef(st)
   stRef.current = st
 
-  const real = useHardware()
   const dev = useDevice()
-  const hasDmm = !real || !!dev?.name.includes('5250')
+  const hasDmm = !!dev?.name.includes('5250')
   const busy = useRef(false)
   const add = (raw: number) => {
     const v = raw - (rel ?? 0)
@@ -81,10 +80,9 @@ export function DMM() {
   }
   useInterval(
     () => {
-      if (!real) return add(t.v + jitter(t.noise))
       if (busy.current || !hw) return
       busy.current = true
-      hw.dmm(MODE[d.fn], rangeOf(d.range, t.unit))
+      hw.dmm(MODE[d.fn], rangeOf(d.range, unit))
         .then(add)
         .catch((e: Error) => {
           d.set({ running: false })
@@ -115,10 +113,10 @@ export function DMM() {
     if (!Number.isFinite(st.last)) return
     setRel(st.last)
     setSt(empty)
-    app.toast('Relative on', { detail: `Readings are offset by ${si(st.last, t.unit, digits - 1)}.` })
+    app.toast('Relative on', { detail: `Readings are offset by ${si(st.last, unit, digits - 1)}.` })
   }
 
-  const fmt = (v: number) => (Number.isFinite(v) ? si(v, t.unit, digits) : '—')
+  const fmt = (v: number) => (Number.isFinite(v) ? si(v, unit, digits) : '—')
 
   return (
     <ScrollPage
@@ -139,7 +137,7 @@ export function DMM() {
     >
       {dev && !hasDmm && (
         <Banner icon={<Info size={16} />} className="-mx-4 -mt-4 mb-0">
-          {dev.name} has no DMM. Connect an Analog Discovery Pro 5250, or the Demo Device to try it.
+          {dev.name} has no DMM. Connect an Analog Discovery Pro 5250 to use it.
         </Banner>
       )}
       <Material className="flex min-w-0 flex-col gap-4 p-6">

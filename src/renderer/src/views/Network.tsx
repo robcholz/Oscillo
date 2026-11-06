@@ -10,9 +10,7 @@ import { fixed, si } from '../components/format'
 import { Grid2, LabeledSelect, PageBar, PanelSection, SplitPage } from '../components/Page'
 import { Plot, type Series } from '../components/Plot'
 import { UnitInput } from '../components/UnitInput'
-import { useInterval } from '../components/useInterval'
-import { lowPass, mag, phaseDeg, sweep } from '../sim/network'
-import { useHardware } from '../devices'
+import { mag, phaseDeg, sweep } from '../../../shared/dsp/network'
 import { cdiv, respond, useSweep } from '../hwsync'
 import { publish, saveImage, saveTable, type Table as DataTable } from '../files'
 import { toggleLoggingFor, useLoggingOf } from '../logging'
@@ -83,7 +81,6 @@ export function Network() {
   const logging = useLoggingOf('Network')
   const toast = app.toast
   const [tab, setTab] = useState<(typeof TABS)[number]>('Bode')
-  const [done, setDone] = useState(s.steps)
   const [view, setView] = useState<[number, number] | null>(null)
   const [cursors, setCursors] = useState<number[]>([])
   const [labels, setLabels] = useState<{ f: number; text: string }[]>([])
@@ -92,16 +89,13 @@ export function Network() {
   const live = s.running && app.running && !!app.device
   const log = s.scale === 'Logarithmic'
 
-  const real = useHardware()
   const [single, setSingle] = useState(false)
-  // One sweep step per tick; a finished sweep restarts while running.
-  useInterval(() => setDone((d) => (d >= s.steps ? 1 : d + 1)), Math.max(15, 2400 / s.steps), live && !real)
 
   const freqs = useMemo(() => sweep(s.start, s.stop, s.steps, log), [s.start, s.stop, s.steps, log])
-  // A real device: the generator drives the circuit; the response is C2 over C1 (or C1 over C2).
+  // The generator drives the circuit; the response is C2 over C1 (or C1 over C2).
   const gen = s.source === 'Wavegen 2' ? 1 : 0
   const hwSweep = useSweep(
-    real && (live || single),
+    live || single,
     freqs,
     async (f) => {
       const [c1, c2] = await respond(f, { amp: s.amp, offset: s.offset, periods: s.periods, settle: s.settle, gen })
@@ -109,10 +103,9 @@ export function Network() {
     },
     { gen, once: single && !live, onDone: () => setSingle(false) }
   )
-  const simH = useMemo(() => freqs.map((f) => lowPass(f)), [freqs])
-  const H = real ? hwSweep.pts : simH
-  const n = real ? hwSweep.done : Math.min(done, s.steps)
-  const at = (f: number) => (real ? (H[freqs.reduce((b, x, i) => (Math.abs(x - f) < Math.abs(freqs[b] - f) ? i : b), 0)] ?? { re: 0, im: 0 }) : lowPass(f))
+  const H = hwSweep.pts
+  const n = hwSweep.done
+  const at = (f: number) => H[freqs.reduce((b, x, i) => (Math.abs(x - f) < Math.abs(freqs[b] - f) ? i : b), 0)] ?? { re: 0, im: 0 }
   const fx = Float64Array.from(freqs.slice(0, n))
   const toMag = (h: (typeof H)[number]) => (s.units === 'dB' ? 20 * Math.log10(mag(h) * s.gain) : mag(h) * s.gain)
   const magY = Float64Array.from(H.slice(0, n), toMag)
@@ -248,9 +241,9 @@ export function Network() {
       <PanelSection title="Sweep">
         <Grid2>
           <LabeledSelect label="Scale" value={s.scale} options={['Logarithmic', 'Linear']} onValueChange={(scale) => { setView(null); s.set({ scale }) }} />
-          <UnitInput label="Steps" value={s.steps} integer min={2} max={10000} onCommit={(steps) => { setDone(1); setRefData(null); s.set({ steps }) }} />
-          <UnitInput label="Start" value={s.start} suffix="Hz" min={1} max={s.stop / 2} onCommit={(start) => { setView(null); setDone(1); setRefData(null); s.set({ start }) }} />
-          <UnitInput label="Stop" value={s.stop} scale={1000} suffix="kHz" min={s.start * 2} max={50e6} onCommit={(stop) => { setView(null); setDone(1); setRefData(null); s.set({ stop }) }} />
+          <UnitInput label="Steps" value={s.steps} integer min={2} max={10000} onCommit={(steps) => { setRefData(null); s.set({ steps }) }} />
+          <UnitInput label="Start" value={s.start} suffix="Hz" min={1} max={s.stop / 2} onCommit={(start) => { setView(null); setRefData(null); s.set({ start }) }} />
+          <UnitInput label="Stop" value={s.stop} scale={1000} suffix="kHz" min={s.start * 2} max={50e6} onCommit={(stop) => { setView(null); setRefData(null); s.set({ stop }) }} />
           <UnitInput label="Settle" value={s.settle} suffix="s" min={0} onCommit={(settle) => s.set({ settle })} />
           <UnitInput label="Min Periods" value={s.periods} integer min={1} onCommit={(periods) => s.set({ periods })} />
         </Grid2>
@@ -289,7 +282,7 @@ export function Network() {
     <SplitPage
       bar={
         <PageBar title="Network Analyzer" status={<StatusDot state={live ? (n < s.steps ? 'BUILDING' : 'READY') : 'QUEUED'} label={live ? (n < s.steps ? 'Sweeping' : 'Sweep Done') : 'Stopped'} />}>
-          <Button size="small" type="secondary" prefix={<StepForward size={16} />} onClick={() => { if (!app.device) return toast('No device connected', { detail: 'Connect a device, then press Single.' }); s.set({ running: false }); if (real) { setSingle(true); return toast('Single sweep started', { detail: `${s.steps} steps, ${si(s.start, 'Hz')} to ${si(s.stop, 'Hz')}.` }) } setDone(s.steps); toast('Single sweep done', { detail: `${s.steps} steps, ${si(s.start, 'Hz')} to ${si(s.stop, 'Hz')}.` }) }}>
+          <Button size="small" type="secondary" prefix={<StepForward size={16} />} onClick={() => { if (!app.device) return toast('No device connected', { detail: 'Connect a device, then press Single.' }); s.set({ running: false }); setSingle(true); toast('Single sweep started', { detail: `${s.steps} steps, ${si(s.start, 'Hz')} to ${si(s.stop, 'Hz')}.` }) }}>
             Single
           </Button>
           <Button size="small" prefix={live ? <Square size={16} /> : <Play size={16} />} onClick={run} tooltipKeys={['Space']}>
