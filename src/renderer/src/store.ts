@@ -19,13 +19,13 @@ interface Persisted {
   running: boolean
   workspace: string
   panels: Record<string, PanelPref>
-  reducedMotion: boolean
+  /** Device buffer configuration, '1' to '4'. */
+  config: string
 }
 
 interface Ephemeral {
   toasts: ToastItem[]
   searchOpen: boolean
-  mcpPending: number
 }
 
 interface Actions {
@@ -37,8 +37,7 @@ interface Actions {
   setWorkspace: (w: string) => void
   setPanel: (id: string, p: Partial<PanelPref>) => void
   setSearchOpen: (o: boolean) => void
-  setMcpPending: (n: number) => void
-  setReducedMotion: (r: boolean) => void
+  setConfig: (c: string) => void
   toast: (title: string, opts?: { detail?: string; action?: ToastItem['action'] }) => void
   dismissToast: (id: number) => void
 }
@@ -57,10 +56,9 @@ export const useStore = create<State>()(
       running: true,
       workspace: 'Untitled',
       panels: {},
-      reducedMotion: false,
+      config: '1',
       toasts: [],
       searchOpen: false,
-      mcpPending: 1,
       go: (page) => set({ page }),
       setTheme: (theme) => set({ theme }),
       setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
@@ -69,8 +67,7 @@ export const useStore = create<State>()(
       setWorkspace: (workspace) => set({ workspace }),
       setPanel: (id, p) => set({ panels: { ...get().panels, [id]: { ...{ width: 320, hidden: false }, ...get().panels[id], ...p } } }),
       setSearchOpen: (searchOpen) => set({ searchOpen }),
-      setMcpPending: (mcpPending) => set({ mcpPending }),
-      setReducedMotion: (reducedMotion) => set({ reducedMotion }),
+      setConfig: (config) => set({ config }),
       toast: (title, opts) => {
         const id = ++toastId
         set({ toasts: [...get().toasts.slice(-2), { id, title, ...opts }] })
@@ -89,7 +86,7 @@ export const useStore = create<State>()(
         running: s.running,
         workspace: s.workspace,
         panels: s.panels,
-        reducedMotion: s.reducedMotion
+        config: s.config
       })
     }
   )

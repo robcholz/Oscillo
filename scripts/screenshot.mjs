@@ -42,6 +42,11 @@ for (const id of ids) {
   )
   await win.reload()
   await win.waitForTimeout(700)
+  // SCROLL=px scrolls each page's scroll area, to check what sits below the fold.
+  if (process.env.SCROLL) {
+    await win.evaluate((y) => document.querySelectorAll('main .overflow-auto').forEach((e) => (e.scrollTop = y)), Number(process.env.SCROLL))
+    await win.waitForTimeout(200)
+  }
   await win.screenshot({ path: join(out, `${id}.png`) })
   console.log('saved', id)
 }

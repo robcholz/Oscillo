@@ -39,7 +39,7 @@
   -webkit-app-region: no-drag;
 }
 
-/* Settings > Reduce Motion, on top of the macOS setting Geist already honours. */
+/* Settings > Animations: Reduced, on top of the macOS setting Geist already honours. */
 html[data-motion='reduced'] *,
 html[data-motion='reduced'] *::before,
 html[data-motion='reduced'] *::after {

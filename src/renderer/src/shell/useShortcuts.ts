@@ -1,8 +1,9 @@
-// App-wide shortcuts, as in the design: ⌘K search, ⌘S save, ⌘B sidebar, ⌘1–6 instruments,
+// App-wide shortcuts, as in the design: ⌘K search, ⌘S save, ⌘B sidebar, ⌘R run script, ⌘1–6 instruments,
 // ⌘, Settings, ⇧⌘L flips light and dark, Space runs or stops everything when nothing has focus.
 import { useEffect } from 'react'
 import { pages } from '../routes'
 import { useStore } from '../store'
+import { useScript } from '../views/script-store'
 import { useSidebarCollapsed } from './Sidebar'
 
 export function useShortcuts(): void {
@@ -23,6 +24,10 @@ export function useShortcuts(): void {
       } else if (mod && !e.shiftKey && k === 'b') {
         e.preventDefault()
         s.setSidebarCollapsed(!collapsed)
+      } else if (mod && !e.shiftKey && k === 'r') {
+        e.preventDefault()
+        s.go('script')
+        useScript.getState().runOrContinue()
       } else if (mod && e.shiftKey && k === 'l') {
         e.preventDefault()
         s.setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark')

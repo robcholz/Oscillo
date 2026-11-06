@@ -3,9 +3,10 @@ import { Tooltip, cn } from '@robcholz/geist'
 import { Check, Cpu, PlugZap, Thermometer, TriangleAlert } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { ModelContextProtocolIcon, TypeScriptIcon } from '../components/icons'
-import { devices } from '../devices'
+import { CONFIGS, devices } from '../devices'
 import type { PageId } from '../routes'
 import { useStore } from '../store'
+import { useMcpSummary } from '../views/mcp-store'
 
 const item = 'box-border inline-flex h-6 items-center gap-1.5 rounded-kbd px-2 text-gray-900 no-underline'
 const link = 'cursor-pointer hover:bg-gray-alpha-200 hover:text-gray-1000 kbd-focus:shadow-focus-ring'
@@ -33,6 +34,8 @@ function Item({ tip, keys, to, onClick, label, className, children }: { tip: str
 
 export function StatusBar() {
   const s = useStore()
+  const mcp = useMcpSummary()
+  const cfg = CONFIGS.find((c) => c.value === s.config) ?? CONFIGS[0]
   const dev = s.device ? devices[s.device] : null
   const running = s.running && !!dev
   return (
@@ -78,7 +81,7 @@ export function StatusBar() {
             </Item>
             <Item tip="Samples in the capture buffer" to="device-options" className="max-[1100px]:hidden">
               <Cpu size={14} />
-              <span className={mono}>32 Ki · 1 Balanced</span>
+              <span className={mono}>{cfg.scope} · {cfg.label}</span>
             </Item>
           </>
         )}
@@ -89,22 +92,22 @@ export function StatusBar() {
           <span>TypeScript Ready</span>
           <Check size={14} className="text-blue-900" />
         </Item>
-        {s.mcpPending > 0 ? (
+        {mcp.pending > 0 ? (
           <Item
             tip="An agent wants to change an output. Review it on MCP Server."
             to="mcp"
-            label={`${s.mcpPending} MCP approval pending, open MCP Server`}
+            label={`${mcp.pending} MCP approval pending, open MCP Server`}
             className="!bg-amber-200 !text-amber-900 shadow-[inset_0_0_0_1px_var(--amber-400)] hover:!bg-amber-300"
           >
             <TriangleAlert size={14} />
             <b className="font-medium">
-              {s.mcpPending} MCP {s.mcpPending === 1 ? 'Approval' : 'Approvals'} Pending
+              {mcp.pending} MCP {mcp.pending === 1 ? 'Approval' : 'Approvals'} Pending
             </b>
           </Item>
         ) : (
-          <Item tip="MCP server running with output approval" to="mcp" label="MCP server, 3 clients">
+          <Item tip={mcp.on ? 'MCP server running' : 'MCP server stopped'} to="mcp" label={mcp.on ? `MCP server, ${mcp.clients} clients` : 'MCP server stopped'}>
             <ModelContextProtocolIcon size={14} />
-            <b className="font-medium text-gray-1000">MCP: 3 Clients</b>
+            <b className="font-medium text-gray-1000">{mcp.on ? `MCP: ${mcp.clients} ${mcp.clients === 1 ? 'Client' : 'Clients'}` : 'MCP: Off'}</b>
           </Item>
         )}
       </div>

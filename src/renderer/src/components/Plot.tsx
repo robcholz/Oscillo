@@ -2,6 +2,7 @@
 // right, X ticks below, and a hover probe that reads every visible series under the pointer.
 import { cn } from '@robcholz/geist'
 import { useMemo, useRef, useState, type ReactNode } from 'react'
+import { usePrefs } from '../prefs'
 import { axisTicks, si, tick } from './format'
 
 export interface Series {
@@ -61,23 +62,27 @@ function fromFrac(f: number, a: Axis): number {
   return a.min + f * (a.max - a.min)
 }
 
-function seriesPath(s: Series, xa: Axis, ya: Axis): string {
+function seriesPath(s: Series, xa: Axis, ya: Axis, smooth = false): string {
   const yr = s.yRange ? { ...ya, min: s.yRange[0], max: s.yRange[1], log: false } : ya
   const n = Math.min(s.x.length, s.y.length)
   if (n === 0) return ''
   // Plot at most ~2 points per horizontal unit.
   const step = Math.max(1, Math.floor(n / 2000))
-  let d = ''
-  let prevY = 0
-  for (let i = 0; i < n; i += step) {
-    const px = (toFrac(s.x[i], xa) * W).toFixed(1)
-    const py = ((1 - toFrac(s.y[i], yr)) * H).toFixed(1)
-    if (i === 0) d += `M${px},${py}`
-    else if (s.kind === 'step') d += `H${px}V${py}`
-    else d += `L${px},${py}`
-    prevY = +py
+  const pts: [number, number][] = []
+  for (let i = 0; i < n; i += step) pts.push([toFrac(s.x[i], xa) * W, (1 - toFrac(s.y[i], yr)) * H])
+  const f = (v: number) => v.toFixed(1)
+  let d = `M${f(pts[0][0])},${f(pts[0][1])}`
+  for (let i = 1; i < pts.length; i++) {
+    const [px, py] = pts[i]
+    if (s.kind === 'step') d += `H${f(px)}V${f(py)}`
+    else if (smooth) {
+      // Catmull-Rom through the samples, as cubic Béziers.
+      const p0 = pts[i - 2] ?? pts[i - 1]
+      const p1 = pts[i - 1]
+      const p3 = pts[i + 1] ?? pts[i]
+      d += `C${f(p1[0] + (px - p0[0]) / 6)},${f(p1[1] + (py - p0[1]) / 6)} ${f(px - (p3[0] - p1[0]) / 6)},${f(py - (p3[1] - p1[1]) / 6)} ${f(px)},${f(py)}`
+    } else d += `L${f(px)},${f(py)}`
   }
-  void prevY
   return d
 }
 
@@ -100,7 +105,9 @@ function lookup(s: Series, xv: number): { y: number; x: number } | null {
   return { x: xv, y: s.y[lo] + (s.y[hi] - s.y[lo]) * t }
 }
 
-export function Plot({ x, y, series, height = 'calc(380px + max(0px, (100vh - 900px) * 0.75))', probe = 'x', ariaLabel, overlay, y2, className, onClick }: PlotProps) {
+export function Plot({ x, y, series, height = 'calc(380px + max(0px, (100vh - 900px) * 0.75))', probe: probeProp = 'x', ariaLabel, overlay, y2, className, onClick }: PlotProps) {
+  const { curve, plotWidth, hover: hoverPref } = usePrefs()
+  const probe = hoverPref ? probeProp : 'none'
   const host = useRef<HTMLDivElement>(null)
   const [hover, setHover] = useState<{ fx: number; fy: number; w: number; h: number } | null>(null)
   // Log axes put one division per decade, so gridlines and labels land on 10, 100, 1 k….
@@ -109,7 +116,7 @@ export function Plot({ x, y, series, height = 'calc(380px + max(0px, (100vh - 90
   const yd = y.divisions ?? (y.log ? decades(y) : 10)
   const minor = (a: Axis, n: number) => (a.log && n <= 8 ? Array.from({ length: n }, (_, d) => [2, 3, 4, 5, 6, 7, 8, 9].map((k) => (d + Math.log10(k)) / n)).flat() : [])
   const visible = series.filter((s) => !s.hidden)
-  const paths = useMemo(() => visible.map((s) => (s.kind === 'bars' ? null : seriesPath(s, x, y))), [visible, x, y])
+  const paths = useMemo(() => visible.map((s) => (s.kind === 'bars' ? null : seriesPath(s, x, y, curve === 'Smooth'))), [visible, x, y, curve])
 
   const yLabels = Array.from({ length: yd + 1 }, (_, i) => {
     const v = y.log ? fromFrac(1 - i / yd, y) : y.max - (i / yd) * (y.max - y.min)
@@ -196,7 +203,7 @@ export function Plot({ x, y, series, height = 'calc(380px + max(0px, (100vh - 90
                 d={paths[k] ?? ''}
                 fill="none"
                 stroke={s.color}
-                strokeWidth={s.width ?? 1.5}
+                strokeWidth={((s.width ?? 1.5) * plotWidth) / 1.5}
                 strokeOpacity={s.opacity ?? 1}
                 strokeDasharray={s.dashed ? '4 4' : undefined}
                 vectorEffect="non-scaling-stroke"

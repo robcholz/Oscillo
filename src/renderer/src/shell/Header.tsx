@@ -11,12 +11,14 @@ import {
 import { useState } from 'react'
 import { devices, type DeviceId } from '../devices'
 import { useStore } from '../store'
+import { useMcpSummary } from '../views/mcp-store'
 import { useSidebarCollapsed } from './Sidebar'
 
 const deviceIcon = { AD3: Usb, DD: Usb, ADP3450: RadioTower, DEMO: Monitor }
 
 export function Header() {
   const s = useStore()
+  const mcp = useMcpSummary()
   const collapsed = useSidebarCollapsed()
   const [rename, setRename] = useState<string | null>(null)
   const dev = s.device ? devices[s.device] : null
@@ -127,23 +129,23 @@ export function Header() {
       <div className="flex flex-none items-center gap-2">
         <Tooltip
           position="bottom"
-          text={s.mcpPending ? 'An agent request is waiting for your approval' : 'MCP server running, 3 clients connected'}
+          text={mcp.pending ? 'An agent request is waiting for your approval' : mcp.on ? `MCP server running, ${mcp.clients} ${mcp.clients === 1 ? 'client' : 'clients'} connected` : 'MCP server stopped'}
         >
           <button
             type="button"
             onClick={() => s.go('mcp')}
-            aria-label={s.mcpPending ? `MCP, ${s.mcpPending} request pending approval` : 'MCP, 3 clients connected'}
+            aria-label={mcp.pending ? `MCP, ${mcp.pending} request pending approval` : mcp.on ? `MCP, ${mcp.clients} clients connected` : 'MCP, server stopped'}
             className={cn(
               'flex h-8 cursor-pointer items-center gap-2 rounded-small px-2.5 text-sm text-gray-1000 kbd-focus:shadow-focus-ring',
-              s.mcpPending
+              mcp.pending
                 ? 'bg-amber-100 shadow-[0_0_0_1px_var(--amber-400)] hover:bg-amber-200'
                 : 'shadow-[0_0_0_1px_var(--gray-alpha-400)] hover:bg-gray-alpha-100'
             )}
           >
-            <StatusDot state={s.mcpPending ? 'BUILDING' : 'READY'} />
+            <StatusDot state={mcp.pending ? 'BUILDING' : mcp.on ? 'READY' : 'QUEUED'} />
             <span className="font-medium">MCP</span>
-            <span className={cn('max-[1220px]:hidden', s.mcpPending ? 'font-medium text-amber-900' : 'text-gray-900')}>
-              {s.mcpPending ? s.mcpPending + ' Pending' : '3 Clients'}
+            <span className={cn('max-[1220px]:hidden', mcp.pending ? 'font-medium text-amber-900' : 'text-gray-900')}>
+              {mcp.pending ? mcp.pending + ' Pending' : mcp.on ? `${mcp.clients} ${mcp.clients === 1 ? 'Client' : 'Clients'}` : 'Off'}
             </span>
           </button>
         </Tooltip>
