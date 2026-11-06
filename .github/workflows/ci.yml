@@ -11,8 +11,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # The design system is a sibling checkout, as on a dev machine (package.json: file:../Geist).
-      - run: git clone --depth 1 https://github.com/robcholz/Geist.git ../Geist
       - uses: actions/setup-node@v4
         with:
           node-version: 22

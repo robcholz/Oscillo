@@ -9,7 +9,7 @@ export default defineConfig({
   renderer: {
     resolve: {
       alias: { '@': resolve('src/renderer/src') },
-      // Geist is linked from ../Geist; resolve its peers from this app so there is one React.
+      // Geist is vendored in geist/ (a git subtree of robcholz/Geist); resolve its peers from this app so there is one React.
       dedupe: ['react', 'react-dom', 'radix-ui', 'cmdk', 'clsx']
     },
     plugins: [react(), tailwindcss()]
