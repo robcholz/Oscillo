@@ -45,6 +45,21 @@ export interface WaveRequest {
   offset: number
   symmetry: number
   phase: number
+  /** Custom samples, −1 to 1, one period (func is then ignored). */
+  data?: number[]
+  /** Amplitude modulation; depth and offset in percent. Left out means off. */
+  am?: ModRequest
+  /** Frequency modulation, also used for sweeps. */
+  fm?: ModRequest
+}
+export interface ModRequest {
+  func: WaveRequest['func']
+  frequency: number
+  amplitude: number
+  offset: number
+  phase: number
+  /** Custom modulator samples, −1 to 1 (func is then ignored). */
+  data?: number[]
 }
 
 export interface SupplyRequest {

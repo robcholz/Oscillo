@@ -243,6 +243,19 @@ export interface WaveSettings {
   offset?: number
   symmetry?: number
   phase?: number
+  /** Custom samples from −1 to 1, played once per period (sets the function to Custom). */
+  data?: ArrayLike<number>
+}
+
+/** A modulation node. Amplitude is the modulation depth in percent; offset in percent too. */
+export interface Modulation {
+  func: WaveFunc
+  frequency: number
+  amplitude: number
+  offset?: number
+  phase?: number
+  symmetry?: number
+  data?: ArrayLike<number>
 }
 
 class Wavegen {
@@ -257,10 +270,30 @@ class Wavegen {
 
   /** Sets the carrier of one channel. Applies on the next start, or live while it runs. */
   set(ch: number, w: WaveSettings): void {
+    this.node(ch, C.AnalogOutNodeCarrier, w)
+  }
+
+  /**
+   * Sets or turns off amplitude (AM) or frequency (FM) modulation of the carrier. A frequency sweep
+   * is FM with a RampUp: depth = (stop − start) / (stop + start) × 100, carrier at the middle.
+   */
+  modulate(ch: number, kind: 'AM' | 'FM', m: Modulation | null): void {
+    const node = kind === 'AM' ? C.AnalogOutNodeAM : C.AnalogOutNodeFM
+    if (!m) {
+      call(this.raw, 'FDwfAnalogOutNodeEnableSet', this.h, ch, node, 0)
+      return
+    }
+    this.node(ch, node, { func: m.func, frequency: m.frequency, amplitude: m.amplitude, offset: m.offset ?? 0, phase: m.phase ?? 0, symmetry: m.symmetry ?? 50, data: m.data })
+  }
+
+  private node(ch: number, node: number, w: WaveSettings): void {
     const { raw, h } = this
-    const node = C.AnalogOutNodeCarrier
     call(raw, 'FDwfAnalogOutNodeEnableSet', h, ch, node, 1)
-    if (w.func) call(raw, 'FDwfAnalogOutNodeFunctionSet', h, ch, node, FUNC[w.func])
+    if (w.data) {
+      call(raw, 'FDwfAnalogOutNodeFunctionSet', h, ch, node, C.funcCustom)
+      const d = Float64Array.from(w.data, (x) => Math.max(-1, Math.min(1, x)))
+      call(raw, 'FDwfAnalogOutNodeDataSet', h, ch, node, d, d.length)
+    } else if (w.func) call(raw, 'FDwfAnalogOutNodeFunctionSet', h, ch, node, FUNC[w.func])
     if (w.frequency !== undefined) call(raw, 'FDwfAnalogOutNodeFrequencySet', h, ch, node, w.frequency)
     if (w.amplitude !== undefined) call(raw, 'FDwfAnalogOutNodeAmplitudeSet', h, ch, node, w.amplitude)
     if (w.offset !== undefined) call(raw, 'FDwfAnalogOutNodeOffsetSet', h, ch, node, w.offset)

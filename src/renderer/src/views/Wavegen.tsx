@@ -318,10 +318,20 @@ for (const i of [0, 1] as const) {
   follow(
     [useWavegen],
     () => {
-      const c = useWavegen.getState().ch[i]
-      return { c: { run: c.run, out: c.out, type: c.type, freq: c.freq, amp: c.amp, offset: c.offset, sym: c.sym, phase: c.phase }, on: useStore.getState().running }
+      const w = useWavegen.getState()
+      const c = w.ch[i]
+      const carrier = w.mod.carrier === 'Channel 2' ? 1 : 0
+      return {
+        c: { run: c.run, out: c.out, type: c.type, freq: c.freq, amp: c.amp, offset: c.offset, sym: c.sym, phase: c.phase },
+        on: useStore.getState().running,
+        x: {
+          custom: c.type === 'Custom' || w.mod.type === 'Custom' ? w.custom.points : [],
+          sweep: i === 0 && w.sweep.on ? w.sweep : null,
+          mod: w.mod.kind !== 'Off' && carrier === i ? { ...w.mod, kind: w.mod.kind } : null
+        }
+      }
     },
-    ({ c, on }) => pushWave(i, c, on),
+    ({ c, on, x }) => pushWave(i, c, on, x),
     `Wavegen Channel ${i + 1}`
   )
 }

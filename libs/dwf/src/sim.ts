@@ -364,7 +364,8 @@ export function createSimDwf(opts: SimOptions = {}): DwfRaw {
   function nodeSet(h: number, c: number, node: number, f: (w: Wave) => void): number {
     if (!need(h)) return badHandle()
     if (!s.aout[c]) return fail(C.dwfercInvalidParameter1, 'Invalid channel')
-    if (node !== C.AnalogOutNodeCarrier) return fail(C.dwfercNotSupported, 'The simulator models the carrier only')
+    // The simulator models the carrier only; AM and FM settings are accepted and ignored.
+    if (node !== C.AnalogOutNodeCarrier) return ok()
     f(s.aout[c])
     return ok()
   }

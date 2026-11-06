@@ -48,11 +48,42 @@ interface WaveCh {
   phase: number
 }
 
-/** Starts or stops a generator channel to match its settings. Custom and Play fall back to a sine. */
-export async function pushWave(i: number, c: WaveCh, on: boolean): Promise<void> {
+/** What the generator page adds on top of a channel's carrier. */
+export interface WaveExtras {
+  custom: number[]
+  /** Frequency sweep, on Channel 1. */
+  sweep: { on: boolean; start: number; stop: number; time: number; scale: string } | null
+  /** AM or FM of this channel, if it is the carrier. */
+  mod: { kind: 'AM' | 'FM'; type: string; freq: number; index: number; offset: number; phase: number } | null
+}
+
+const MOD_FUNC: Record<string, WaveRequest['func']> = { Sine: 'Sine', Square: 'Square', Triangle: 'Triangle' }
+
+/**
+ * Starts or stops a generator channel to match its settings. Custom plays the drawn points; Play
+ * (streaming a file) is not supported on hardware yet and plays a sine.
+ */
+export async function pushWave(i: number, c: WaveCh, on: boolean, x: WaveExtras = { custom: [], sweep: null, mod: null }): Promise<void> {
   if (!hw) return
   if (!on || !c.run || !c.out) return hw.wavegenStop(i)
-  return hw.wavegen(i, { func: FUNC[c.type] ?? 'Sine', frequency: c.freq, amplitude: c.amp, offset: c.offset, symmetry: c.sym, phase: c.phase })
+  const req: WaveRequest = { func: FUNC[c.type] ?? 'Sine', frequency: c.freq, amplitude: c.amp, offset: c.offset, symmetry: c.sym, phase: c.phase }
+  if (c.type === 'Custom' && x.custom.length > 1) req.data = x.custom
+  if (x.sweep?.on && x.sweep.stop > 0 && x.sweep.start > 0) {
+    // FM moves the frequency to fc × (1 + depth × m(t)); a ramp from −1 to 1 sweeps start → stop.
+    const { start, stop, time } = x.sweep
+    const fc = (start + stop) / 2
+    const depth = Math.abs(stop - start) / (stop + start)
+    req.frequency = fc
+    req.fm = { func: 'RampUp', frequency: 1 / Math.max(1e-3, time), amplitude: depth * 100, offset: 0, phase: 0 }
+    if (x.sweep.scale === 'Logarithmic' && depth > 0)
+      req.fm.data = Array.from({ length: 1024 }, (_, k) => (start * (stop / start) ** (k / 1023) - fc) / (fc * depth))
+  }
+  if (x.mod) {
+    const m = { func: MOD_FUNC[x.mod.type] ?? 'Sine', frequency: x.mod.freq, amplitude: x.mod.index, offset: x.mod.offset, phase: x.mod.phase, data: x.mod.type === 'Custom' && x.custom.length > 1 ? x.custom : undefined }
+    if (x.mod.kind === 'AM') req.am = m
+    else if (!req.fm) req.fm = m
+  }
+  return hw.wavegen(i, req)
 }
 
 export async function pushSupplies(s: { master: boolean; pos: { on: boolean; volts: number }; neg: { on: boolean; volts: number } }): Promise<void> {

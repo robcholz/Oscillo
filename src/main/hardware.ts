@@ -85,7 +85,9 @@ export class Hardware {
 
   wavegen(ch: number, w: WaveRequest): void {
     const d = this.need()
-    d.wavegen.set(ch, w)
+    d.wavegen.set(ch, { func: w.func, frequency: w.frequency, amplitude: w.amplitude, offset: w.offset, symmetry: w.symmetry, phase: w.phase, data: w.data })
+    d.wavegen.modulate(ch, 'AM', w.am ?? null)
+    d.wavegen.modulate(ch, 'FM', w.fm ?? null)
     d.wavegen.start(ch)
   }
 
