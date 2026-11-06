@@ -4,6 +4,10 @@ import { PageBar } from '../components/Page'
 import { pageById, type PageId } from '../routes'
 import { useStore } from '../store'
 import { DMM } from '../views/DMM'
+import { Logic } from '../views/Logic'
+import { Patterns } from '../views/Patterns'
+import { Protocol } from '../views/Protocol'
+import { StaticIO } from '../views/StaticIO'
 import { Logger } from '../views/Logger'
 import { Scope } from '../views/Scope'
 import { Supplies } from '../views/Supplies'
@@ -16,7 +20,11 @@ const views: Partial<Record<PageId, ComponentType>> = {
   supplies: Supplies,
   voltmeter: Voltmeter,
   dmm: DMM,
-  logger: Logger
+  logger: Logger,
+  logic: Logic,
+  patterns: Patterns,
+  'static-io': StaticIO,
+  protocol: Protocol
 }
 
 export function PageView() {

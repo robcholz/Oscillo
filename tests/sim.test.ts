@@ -3,6 +3,7 @@ import { axisTicks, si } from '../src/renderer/src/components/format'
 import { parseSi } from '../src/renderer/src/components/UnitInput'
 import { check, compile } from '../src/renderer/src/sim/expr'
 import { spectrum } from '../src/renderer/src/sim/dsp'
+import { capture as logicCapture, decodeBus, decodeSpi, decodeUart, MOSI_BYTES, pulseStats } from '../src/renderer/src/sim/logic'
 
 describe('math formulas', () => {
   it('evaluates with precedence and functions', () => {
@@ -45,5 +46,25 @@ describe('spectrum', () => {
     expect(f[k]).toBeLessThan(1020)
     expect(db[k]).toBeGreaterThan(-1.5)
     expect(db[k]).toBeLessThan(0.5)
+  })
+})
+
+describe('logic decoders', () => {
+  const c = logicCapture(1)
+  it('decodes the SPI bytes that were sent', () => {
+    expect(decodeSpi(c.signals).map((f) => f.mo)).toEqual(MOSI_BYTES.map((b) => '0x' + b.toString(16).toUpperCase().padStart(2, '0')))
+  })
+  it('decodes UART characters', () => {
+    expect(decodeUart(c.signals.RX).map((f) => f.text)).toEqual(["'O'", "'K'", "'\\r'"])
+    expect(decodeUart(c.signals.TX).map((f) => f.text)).toEqual(["'A'", "'T'"])
+  })
+  it('measures the SPI clock', () => {
+    const p = pulseStats(c.signals.SCK)!
+    expect(p.period).toBeCloseTo(5e-6, 9)
+    expect(p.width).toBeCloseTo(2.5e-6, 9)
+  })
+  it('merges equal bus values', () => {
+    const f = decodeBus(c.signals, ['SCK', 'MOSI', 'MISO', 'CS'])
+    for (let i = 1; i < f.length; i++) expect(f[i].text).not.toBe(f[i - 1].text)
   })
 })
