@@ -1,0 +1,692 @@
+// Protocol (board: Protocol). A console per bus (UART, SPI, I2C, CAN, CEC, JTAG, SWD, AVR) with a
+// compose bar that talks to simulated devices, spy modes, and the per-protocol settings panel.
+import { Badge, Button, Description, Input, Note, Progress, Select, StatusDot, Switch, Tabs, Toggle, type StatusDotState } from '@robcholz/geist'
+import { CornerDownLeft, Cpu, Eye, FolderOpen, Plug, RefreshCw, Search, Square, SquareTerminal, Trash2, Upload, X } from 'lucide-react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { Grid2, LabeledInput, LabeledSelect, PageBar, PanelSection, SplitPage } from '../components/Page'
+import { useInterval } from '../components/useInterval'
+import { useStore } from '../store'
+
+const TABS = ['UART', 'SPI', 'I2C', 'CAN', 'CEC', 'JTAG', 'SWD', 'AVR'] as const
+type Tab = (typeof TABS)[number]
+const PINS = Array.from({ length: 16 }, (_, i) => `DIO ${i}`)
+const CEC_ADDR = ['0 · TV', '1 · Recorder 1', '3 · Tuner 1', '4 · Playback 1', '5 · Audio System', '8 · Playback 2', '15 · Broadcast']
+const CEC_OPS = ['0x04 · Image View On', '0x36 · Standby', '0x44 · User Control Pressed', '0x46 · Give OSD Name', '0x83 · Give Physical Address', '0x8F · Give Power Status', '0x9F · Get CEC Version']
+const SWD_REGS = ['0x0 · DPIDR', '0x4 · CTRL/STAT', '0x8 · SELECT', '0xC · RDBUFF']
+const AVR_CMDS = ['Read Signature', 'Read Fuses', 'Read Lock Bits', 'Read Flash Word', 'Read EEPROM Byte']
+const CHIPS: Record<string, string> = { ATmega328P: '1E 95 0F', ATmega2560: '1E 98 01', ATmega32U4: '1E 95 87', ATtiny85: '1E 93 0B', ATtiny13A: '1E 90 07' }
+
+interface Line {
+  t: string
+  d: 'TX' | 'RX' | '··'
+  x: string
+  raw?: string
+  r?: 'ACK' | 'NAK' | ''
+  err?: boolean
+}
+
+const F0 = {
+  ts: true, auto: true, draft: '', ending: 'CR LF', uBaud: '115200', uBits: '8', uPar: 'None', uStop: '1', uTx: 'DIO 4', uRx: 'DIO 5', uPol: 'Normal',
+  spiMode: 'Master', spiCs: 'DIO 3', spiClk: 'DIO 0', spiMosi: 'DIO 1', spiMiso: 'DIO 2', spiHz: '1', spiCpol: 'Mode 0', spiOrder: 'MSB First', spiLines: 'Standard', spiW: '9F 00 00 00', spiR: '3',
+  i2cMode: 'Master', i2cScl: 'DIO 0', i2cSda: 'DIO 1', i2cHz: '100', i2cStretch: true, i2cAddr: '0x48', i2cW: '00', i2cR: '2',
+  canTx: 'DIO 6', canRx: 'DIO 7', canRate: '500', canPol: 'Normal', canSpy: false, canId: '0x123', canD: 'DE AD BE EF', canExt: false, canRtr: false,
+  cecPin: 'DIO 8', cecOwn: '4 · Playback 1', cecSpy: false, cecTo: '0 · TV', cecOp: '0x04 · Image View On', cecArg: '',
+  jTck: 'DIO 0', jTms: 'DIO 1', jTdi: 'DIO 2', jTdo: 'DIO 3', jHz: '1', jEdge: 'Rising', jReg: 'IR', jLen: '6', jVal: '09',
+  sClk: 'DIO 0', sIo: 'DIO 1', sRst: 'None', sHz: '1', sTurn: '1', sPort: 'DP', sAddr: '0x0 · DPIDR', sVal: '00000000',
+  aChip: 'ATmega328P', aRst: 'DIO 3', aSck: 'DIO 0', aMosi: 'DIO 1', aMiso: 'DIO 2', aHz: '125', aLfuse: 'FF', aHfuse: 'DE', aEfuse: 'FD', aLock: 'FF', aFile: '~/avr/blink.hex', aCmd: 'Read Signature', aAddr: '0000'
+}
+type Fields = typeof F0
+
+const seed: Record<Tab, Line[]> = {
+  UART: [
+    { t: '12:04:31.208', d: 'TX', x: 'AT+RST' },
+    { t: '12:04:31.260', d: 'RX', x: 'OK' },
+    { t: '12:04:32.001', d: 'TX', x: 'AT+GMR' },
+    { t: '12:04:32.044', d: 'RX', x: 'v2.4.0' },
+    { t: '12:04:32.045', d: 'RX', x: 'OK' }
+  ],
+  SPI: [
+    { t: '12:06:01.420', d: 'TX', x: 'Write 9F 00 00 00', raw: 'CS↓  9F 00 00 00' },
+    { t: '12:06:01.421', d: 'RX', x: 'Read EF 40 18 · JEDEC ID, Winbond W25Q128', raw: 'FF EF 40 18  CS↑' }
+  ],
+  I2C: [
+    { t: '12:06:01.420', d: 'TX', x: 'Write 0x48: 01 60', raw: 'S 90 A 01 A 60 A P', r: 'ACK' },
+    { t: '12:06:02.010', d: 'TX', x: 'Read 0x50', raw: 'S A1 N P', r: 'NAK' }
+  ],
+  CAN: [
+    { t: '12:06:05.100', d: 'TX', x: 'ID 0x123 · DLC 4 · DE AD BE EF', raw: '123 0 4 DE AD BE EF CRC 3A51', r: 'ACK' },
+    { t: '12:06:05.104', d: 'RX', x: 'ID 0x7E8 · DLC 4 · 02 41 0D 32', raw: '7E8 0 4 02 41 0D 32 CRC 1F07', r: 'ACK' }
+  ],
+  CEC: [
+    { t: '12:07:10.002', d: 'TX', x: 'Playback 1 → TV · Give Physical Address', raw: '40:83', r: 'ACK' },
+    { t: '12:07:10.031', d: 'RX', x: 'TV → Broadcast · Report Physical Address 0.0.0.0', raw: '0F:84:00:00:00' }
+  ],
+  JTAG: [],
+  SWD: [],
+  AVR: []
+}
+
+const now = () => {
+  const d = new Date()
+  return d.toLocaleTimeString('en-GB', { hour12: false }) + '.' + String(d.getMilliseconds()).padStart(3, '0')
+}
+const rndHex = (n: number) => Array.from({ length: n }, () => Math.floor(Math.random() * 256).toString(16).toUpperCase().padStart(2, '0')).join(' ')
+const bytes = (s: string) => s.trim().split(/[\s,]+/).filter(Boolean)
+const isHex = (s: string) => bytes(s).every((b) => /^(0x)?[0-9a-f]{1,2}$/i.test(b))
+const hexOf = (s: string) => [...s].map((c) => c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')).join(' ')
+
+let memo: { logs: Record<Tab, Line[]>; f: Fields; tab: Tab } | null = null
+
+export function Protocol() {
+  const app = useStore()
+  const toast = app.toast
+  const [tab, setTab] = useState<Tab>(memo?.tab ?? 'UART')
+  const [f, setF] = useState<Fields>(memo?.f ?? F0)
+  const [logs, setLogs] = useState<Record<Tab, Line[]>>(memo?.logs ?? seed)
+  const [open, setOpen] = useState(true)
+  const [views, setViews] = useState<Record<string, string>>({})
+  const [chain, setChain] = useState<string[][] | null>(null)
+  const [swd, setSwd] = useState(false)
+  const [avr, setAvr] = useState(false)
+  const [pct, setPct] = useState(0)
+  const [busy, setBusy] = useState('')
+  const logRef = useRef<HTMLDivElement>(null)
+  const isU = tab === 'UART'
+  const set = <K extends keyof Fields>(k: K) => (v: Fields[K]) => setF((x) => ({ ...x, [k]: v }))
+  const view = views[tab] ?? (isU ? 'ASCII' : 'Decoded')
+  const spy: Partial<Record<Tab, boolean>> = { SPI: f.spiMode === 'Spy', I2C: f.i2cMode === 'Spy', CAN: f.canSpy, CEC: f.cecSpy }
+
+  useEffect(() => {
+    memo = { logs, f, tab }
+  }, [logs, f, tab])
+  useEffect(() => {
+    if (f.auto && logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
+  }, [logs, tab, f.auto])
+
+  const push = (T: Tab, lines: Omit<Line, 't'>[]) => setLogs((l) => ({ ...l, [T]: [...l[T], ...lines.map((x) => ({ t: now(), ...x }))].slice(-500) }))
+  const need = (ok: boolean, title: string, detail: string) => {
+    if (!ok) toast(title, { detail })
+    return ok
+  }
+  const device = () => need(!!app.device, 'No device connected', 'Connect a device, then try again.')
+
+  // Spy modes: traffic arrives about once a second.
+  useInterval(() => {
+    if (tab === 'SPI' && spy.SPI) push('SPI', [{ d: 'RX', x: 'MOSI 03 00 10 00 · MISO ' + rndHex(4), raw: 'CS↓ 03 00 10 00 | ' + rndHex(4) + ' CS↑' }])
+    if (tab === 'I2C' && spy.I2C) {
+      const t = Math.random() * 25 + 20
+      const v = Math.round(t * 16).toString(16).toUpperCase().padStart(3, '0')
+      push('I2C', [{ d: 'RX', x: `Read 0x48: ${v.slice(0, 2)} ${v[2]}0 · ${t.toFixed(2)} °C`, raw: 'S 91 A ' + rndHex(2) + ' N P', r: 'ACK' }])
+    }
+    if (tab === 'CAN' && spy.CAN) {
+      const id = ['0x0C0', '0x1A4', '0x7E8'][Math.floor(Math.random() * 3)]
+      const d = rndHex(8)
+      push('CAN', [{ d: 'RX', x: `ID ${id} · DLC 8 · ${d}`, raw: `${id.slice(2)} 0 8 ${d}`, r: 'ACK' }])
+    }
+    if (tab === 'CEC' && spy.CEC && Math.random() < 0.4) push('CEC', [{ d: 'RX', x: 'TV → Audio System · Give Audio Status', raw: '05:71', r: 'ACK' }])
+  }, 1100, !!app.device && !!spy[tab])
+
+  const act = {
+    uart: () => {
+      if (!device() || !need(open, 'Port is closed', 'Open the port, then send again.') || !f.draft) return
+      const cmd = f.draft
+      push('UART', [{ d: 'TX', x: cmd }])
+      setF((x) => ({ ...x, draft: '' }))
+      const c = cmd.trim().toUpperCase()
+      const r = c === 'AT' ? ['OK'] : c === 'AT+RST' ? ['OK', 'ready'] : c === 'AT+GMR' ? ['v2.4.0', 'OK'] : c.startsWith('AT+') ? ['ERROR'] : [cmd]
+      setTimeout(() => push('UART', r.map((x) => ({ d: 'RX' as const, x, err: x === 'ERROR' }))), 60)
+    },
+    spi: () => {
+      if (!device()) return
+      if (!need(isHex(f.spiW), 'Write bytes are not hex', 'Use bytes like 9F 00 00 00.')) return
+      const w = bytes(f.spiW).map((b) => b.replace(/^0x/i, '').toUpperCase().padStart(2, '0'))
+      const n = Math.max(0, Math.min(256, Number(f.spiR) || 0))
+      const jedec = w[0] === '9F'
+      const read = jedec ? ['EF', '40', '18'].slice(0, n || 3).join(' ') : rndHex(n)
+      push('SPI', [
+        { d: 'TX', x: 'Write ' + w.join(' '), raw: 'CS↓  ' + w.join(' ') },
+        ...(n ? [{ d: 'RX' as const, x: 'Read ' + read + (jedec ? ' · JEDEC ID, Winbond W25Q128' : ''), raw: 'FF ' + read + '  CS↑' }] : [])
+      ])
+    },
+    i2c: (read: boolean) => {
+      if (!device()) return
+      const a = parseInt(f.i2cAddr, 16)
+      if (!need(a >= 0x08 && a <= 0x77, 'Address out of range', 'Use a 7-bit address from 0x08 to 0x77.')) return
+      if (!need(isHex(f.i2cW), 'Write bytes are not hex', 'Use bytes like 01 60.')) return
+      const ack = a === 0x48 || a === 0x68
+      const addr = '0x' + a.toString(16).toUpperCase().padStart(2, '0')
+      const w = bytes(f.i2cW).join(' ').toUpperCase()
+      const lines: Omit<Line, 't'>[] = [{ d: 'TX', x: `Write ${addr}: ${w}`, raw: `S ${(a << 1).toString(16).toUpperCase()} ${ack ? 'A' : 'N'} ${ack ? w.split(' ').join(' A ') + ' A' : ''} P`, r: ack ? 'ACK' : 'NAK' }]
+      if (read && ack) {
+        const n = Math.max(1, Math.min(32, Number(f.i2cR) || 1))
+        const d = a === 0x48 ? ['19', '80', ...Array(30).fill('00')].slice(0, n).join(' ') + (n >= 2 ? ' · 25.50 °C' : '') : rndHex(n)
+        lines.push({ d: 'RX', x: `Read ${addr}: ${d}`, raw: `Sr ${((a << 1) | 1).toString(16).toUpperCase()} A ${d.split(' · ')[0]} N P`, r: 'ACK' })
+      }
+      push('I2C', lines)
+    },
+    scan: () => {
+      if (!device()) return
+      push('I2C', [{ d: '··', x: 'Scanning 0x08 to 0x77…' }])
+      setBusy('Scanning')
+      setTimeout(() => {
+        push('I2C', [{ d: 'RX', x: 'Found 2 devices: 0x48 (TMP102), 0x68 (DS3231)', r: 'ACK' }])
+        setBusy('')
+      }, 700)
+    },
+    can: () => {
+      if (!device()) return
+      const d = bytes(f.canD)
+      if (!need(isHex(f.canD) && d.length <= 8, 'Data is not valid', 'Use up to 8 hex bytes, like DE AD BE EF.')) return
+      const id = f.canId.toUpperCase().replace('0X', '0x')
+      push('CAN', [{ d: 'TX', x: `ID ${id} · DLC ${d.length}${f.canRtr ? ' · Remote' : ''} · ${d.join(' ').toUpperCase()}`, raw: `${id.slice(2)} ${f.canExt ? 1 : 0} ${d.length} ${d.join(' ').toUpperCase()} CRC ${rndHex(2).replace(' ', '')}`, r: 'ACK' }])
+    },
+    cec: () => {
+      if (!device()) return
+      const from = f.cecOwn.split(' · ')[1]
+      const to = f.cecTo.split(' · ')[1]
+      const op = f.cecOp.split(' · ')
+      push('CEC', [{ d: 'TX', x: `${from} → ${to} · ${op[1]}${f.cecArg ? ' ' + f.cecArg : ''}`, raw: `${f.cecOwn[0]}${f.cecTo.split(' ')[0] === '15' ? 'F' : f.cecTo[0]}:${op[0].slice(2)}${f.cecArg ? ':' + bytes(f.cecArg).join(':') : ''}`, r: 'ACK' }])
+      if (op[0] === '0x83') setTimeout(() => push('CEC', [{ d: 'RX', x: `${to} → Broadcast · Report Physical Address 0.0.0.0`, raw: '0F:84:00:00:00' }]), 40)
+      if (op[0] === '0x8F') setTimeout(() => push('CEC', [{ d: 'RX', x: `${to} → ${from} · Report Power Status On`, raw: `0${f.cecOwn[0]}:90:00` }]), 40)
+    },
+    cecPoll: () => {
+      if (!device()) return
+      push('CEC', [{ d: '··', x: 'Polling logical addresses…' }, { d: 'RX', x: 'Present: 0 · TV, 5 · Audio System', r: 'ACK' }])
+    },
+    jScan: () => {
+      if (!device()) return
+      setBusy('Scanning Chain')
+      setTimeout(() => {
+        const c = [
+          ['0x4BA00477', 'ARM Cortex-M4 DAP', '4'],
+          ['0x06413041', 'STM32F4 Boundary Scan', '5']
+        ]
+        setChain(c)
+        push('JTAG', [{ d: '··', x: 'Chain scanned: 2 devices, IR total 9 bits' }, ...c.map((d, i) => ({ d: 'RX' as const, x: `Device ${i}: IDCODE ${d[0]} · ${d[1]}`, raw: `DR 32 bits: ${d[0]}` }))])
+        setBusy('')
+      }, 500)
+    },
+    jShift: () => {
+      if (!device()) return
+      if (!need(/^[0-9a-f]+$/i.test(f.jVal), 'Value is not hex', 'Use a hex value like 09.')) return
+      const out = f.jReg === 'IR' ? '01' : Math.floor(Math.random() * 2 ** 31).toString(16).toUpperCase().padStart(8, '0')
+      push('JTAG', [
+        { d: 'TX', x: `Shift ${f.jReg} ${f.jLen} bits: 0x${f.jVal.toUpperCase()}`, raw: `TMS 1100 TDI ${parseInt(f.jVal, 16).toString(2).padStart(Number(f.jLen) || 1, '0')}` },
+        { d: 'RX', x: `TDO 0x${out}`, raw: `TDO ${parseInt(out, 16).toString(2)}` }
+      ])
+    },
+    jReset: () => device() && push('JTAG', [{ d: '··', x: 'TAP reset: TMS high for 5 clocks, now Run-Test/Idle' }]),
+    sConnect: () => {
+      if (!device()) return
+      if (swd) {
+        setSwd(false)
+        return push('SWD', [{ d: '··', x: 'Disconnected' }])
+      }
+      setSwd(true)
+      push('SWD', [{ d: '··', x: 'Line reset and JTAG-to-SWD sequence sent' }, { d: 'RX', x: 'DPIDR 0x2BA01477 · ARM Cortex-M DP v1', raw: 'OK 2BA01477 P1', r: 'ACK' }])
+    },
+    sRead: () => {
+      if (!device() || !need(swd, 'Not connected', 'Press Connect to read the Debug Port ID first.')) return
+      const v = f.sAddr.startsWith('0x0') ? '2BA01477' : f.sAddr.startsWith('0x4') ? 'F0000040' : rndHex(4).replace(/ /g, '')
+      push('SWD', [{ d: 'RX', x: `Read ${f.sPort} ${f.sAddr}: 0x${v}`, raw: `OK ${v}`, r: 'ACK' }])
+    },
+    sWrite: () => {
+      if (!device() || !need(swd, 'Not connected', 'Press Connect to read the Debug Port ID first.')) return
+      if (!need(/^[0-9a-f]{1,8}$/i.test(f.sVal), 'Value is not valid', 'Use up to 8 hex digits.')) return
+      push('SWD', [{ d: 'TX', x: `Write ${f.sPort} ${f.sAddr}: 0x${f.sVal.toUpperCase().padStart(8, '0')}`, raw: `OK ${f.sVal.toUpperCase()}`, r: 'ACK' }])
+    },
+    aSig: () => {
+      if (!device()) return
+      setAvr(true)
+      push('AVR', [{ d: '··', x: 'Programming Enable: AC 53 00 00 → 53 echoed' }, { d: 'RX', x: `Signature ${CHIPS[f.aChip]} · ${f.aChip}`, raw: '30 00 00 xx ×3' }])
+    },
+    aRun: () => {
+      if (!device() || !need(avr, 'Not in programming mode', 'Press Read Signature first.')) return
+      const out: Record<string, string> = {
+        'Read Signature': `${CHIPS[f.aChip]} · ${f.aChip}`,
+        'Read Fuses': `Low ${f.aLfuse} · High ${f.aHfuse} · Extended ${f.aEfuse}`,
+        'Read Lock Bits': f.aLock,
+        'Read Flash Word': `0x${f.aAddr}: 0C 94`,
+        'Read EEPROM Byte': `0x${f.aAddr}: FF`
+      }
+      push('AVR', [{ d: 'RX', x: `${f.aCmd} · ${out[f.aCmd]}` }])
+    },
+    aFuseW: () => {
+      if (!device() || !need(avr, 'Not in programming mode', 'Press Read Signature first.')) return
+      if (!need([f.aLfuse, f.aHfuse, f.aEfuse, f.aLock].every((x) => /^[0-9a-f]{2}$/i.test(x)), 'Fuse values are not valid', 'Use two hex digits for each fuse, like DE.')) return
+      push('AVR', [{ d: 'TX', x: `Wrote fuses Low ${f.aLfuse} · High ${f.aHfuse} · Extended ${f.aEfuse} · Lock ${f.aLock}` }])
+    },
+    aProg: (verb: 'Program' | 'Verify' | 'Erase') => {
+      if (!device() || !need(avr, 'Not in programming mode', 'Press Read Signature first.')) return
+      setBusy(verb === 'Program' ? 'Programming' : verb === 'Verify' ? 'Verifying' : 'Erasing')
+      setPct(0)
+      let p = 0
+      const id = setInterval(() => {
+        p += verb === 'Erase' ? 50 : 10
+        setPct(Math.min(100, p))
+        if (p >= 100) {
+          clearInterval(id)
+          setBusy('')
+          push('AVR', [{ d: '··', x: verb === 'Program' ? `Programmed ${f.aFile}: 924 bytes, verified` : verb === 'Verify' ? 'Flash matches the file: 924 bytes' : 'Chip erased' }])
+        }
+      }, 120)
+    }
+  }
+
+  const topBtn: { text: string; icon: ReactNode; onClick: () => void } = isU
+    ? { text: open ? 'Close Port' : 'Open Port', icon: open ? <X size={16} /> : <Plug size={16} />, onClick: () => { setOpen(!open); push('UART', [{ d: '··', x: !open ? `Port opened at ${f.uBaud} bit/s` : 'Port closed' }]) } }
+    : spy[tab] !== undefined
+      ? {
+          text: spy[tab] ? 'Stop Spy' : 'Start Spy',
+          icon: spy[tab] ? <Square size={16} /> : <Eye size={16} />,
+          onClick: () => {
+            const on = !spy[tab]
+            const k = ({ SPI: 'spiMode', I2C: 'i2cMode', CAN: 'canSpy', CEC: 'cecSpy' } as const)[tab as 'SPI']
+            setF((x) => ({ ...x, [k]: tab === 'SPI' || tab === 'I2C' ? (on ? 'Spy' : 'Master') : on }) as Fields)
+            push(tab, [{ d: '··', x: on ? 'Spying: listening without driving the bus' : 'Spy stopped' }])
+          }
+        }
+      : tab === 'JTAG'
+        ? { text: 'Scan Chain', icon: <Search size={16} />, onClick: act.jScan }
+        : tab === 'SWD'
+          ? { text: swd ? 'Disconnect' : 'Connect', icon: swd ? <X size={16} /> : <Plug size={16} />, onClick: act.sConnect }
+          : { text: 'Read Signature', icon: <Cpu size={16} />, onClick: act.aSig }
+
+  const stat: { state: StatusDotState; label: string } = busy
+    ? { state: 'BUILDING', label: busy }
+    : isU
+      ? { state: open ? 'READY' : 'QUEUED', label: open ? 'UART Open' : 'UART Closed' }
+      : spy[tab]
+        ? { state: 'BUILDING', label: `${tab} Spying` }
+        : tab === 'SWD'
+          ? { state: swd ? 'READY' : 'QUEUED', label: swd ? 'SWD Connected' : 'SWD Not Connected' }
+          : tab === 'AVR'
+            ? { state: avr ? 'READY' : 'QUEUED', label: avr ? 'AVR in Programming Mode' : 'AVR Idle' }
+            : { state: 'READY', label: `${tab} Ready` }
+
+  const L = logs[tab]
+  const txB = L.filter((l) => l.d === 'TX').reduce((n, l) => n + (isU ? l.x.length + 2 : bytes(l.raw ?? l.x).length), 0)
+  const rxB = L.filter((l) => l.d === 'RX').reduce((n, l) => n + (isU ? l.x.length + 2 : bytes(l.raw ?? l.x).length), 0)
+  const emptyText = isU
+    ? open
+      ? 'Console cleared. Sent and received data appears here.'
+      : 'Open the port to send and receive data.'
+    : spy[tab]
+      ? 'Spying. Traffic on the bus appears here.'
+      : ({ JTAG: 'Scan the chain to list every device, then shift IR and DR.', SWD: 'Connect to read the Debug Port ID, then read or write registers.', AVR: 'Read the signature to put the chip in programming mode.' } as Partial<Record<Tab, string>>)[tab] ?? 'Sent and received frames appear here.'
+
+  const info =
+    tab === 'JTAG'
+      ? chain
+        ? chain.map((c, i) => ({ k: `Device ${i}`, v: `${c[0]} · ${c[1]} · IR ${c[2]}`, mono: false }))
+        : [{ k: 'Chain', v: 'Not scanned', mono: false }]
+      : tab === 'SWD'
+        ? [
+            { k: 'DPIDR', v: swd ? '0x2BA01477' : '—', mono: true },
+            { k: 'Target', v: swd ? 'Cortex-M4, STM32F411' : 'Not connected', mono: false }
+          ]
+        : tab === 'AVR'
+          ? [
+              { k: 'Chip', v: f.aChip, mono: false },
+              { k: 'Signature', v: avr ? CHIPS[f.aChip] : '—', mono: true }
+            ]
+          : []
+
+  const enter = (fn: () => void) => (e: React.KeyboardEvent) => e.key === 'Enter' && fn()
+  const mono = 'font-mono'
+  const inp = (k: keyof Fields, label: string, placeholder: string, on?: () => void, extra?: { suffix?: string; mono?: boolean }) => (
+    <Input
+      size="small"
+      aria-label={label}
+      placeholder={placeholder}
+      value={String(f[k])}
+      onChange={(e) => set(k)(e.target.value as never)}
+      onKeyDown={on ? enter(on) : undefined}
+      className={extra?.mono === false ? undefined : mono}
+      suffix={extra?.suffix ? <span className="text-[13px] text-gray-700">{extra.suffix}</span> : undefined}
+    />
+  )
+  const sel = (k: keyof Fields, label: string, options: readonly string[]) => <Select size="small" aria-label={label} value={String(f[k])} options={options} onValueChange={(v) => set(k)(v as never)} />
+  const sendBtn = (text: string, onClick: () => void) => (
+    <Button size="small" suffix={<CornerDownLeft size={16} />} onClick={onClick}>
+      {text}
+    </Button>
+  )
+
+  const compose: Partial<Record<Tab, ReactNode>> = {
+    UART: (
+      <>
+        <div className="min-w-0 flex-1">{inp('draft', 'Data to send', 'Type a message and press Enter', act.uart)}</div>
+        <div className="w-[104px]">{sel('ending', 'Line Ending', ['CR LF', 'LF', 'None'])}</div>
+        {sendBtn('Send', act.uart)}
+      </>
+    ),
+    SPI: (
+      <>
+        <div className="min-w-0 flex-1">{inp('spiW', 'Write Bytes', 'Hex bytes to write, like 9F 00 00 00', act.spi)}</div>
+        <div className="w-24">{inp('spiR', 'Read Count', 'Read Count', act.spi, { suffix: 'B', mono: false })}</div>
+        {sendBtn('Transfer', act.spi)}
+      </>
+    ),
+    I2C: (
+      <>
+        <div className="w-[88px]">{inp('i2cAddr', 'Address', '0x48')}</div>
+        <div className="min-w-0 flex-1">{inp('i2cW', 'Write Bytes', 'Hex bytes, like 01 60', () => act.i2c(true))}</div>
+        <div className="w-24">{inp('i2cR', 'Read Count', 'Read Count', undefined, { suffix: 'B', mono: false })}</div>
+        <Button size="small" type="tertiary" prefix={<Search size={16} />} onClick={act.scan}>
+          Scan
+        </Button>
+        <Button size="small" type="secondary" onClick={() => act.i2c(false)}>
+          Write
+        </Button>
+        {sendBtn('Write and Read', () => act.i2c(true))}
+      </>
+    ),
+    CAN: (
+      <>
+        <div className="w-28">{inp('canId', 'ID', '0x123')}</div>
+        <div className="min-w-0 flex-1">{inp('canD', 'Data', 'Up to 8 hex bytes', act.can)}</div>
+        {sendBtn('Send Frame', act.can)}
+      </>
+    ),
+    CEC: (
+      <>
+        <div className="w-40">{sel('cecTo', 'Destination', CEC_ADDR)}</div>
+        <div className="w-60">{sel('cecOp', 'Opcode', CEC_OPS)}</div>
+        <div className="min-w-0 flex-1">{inp('cecArg', 'Operands', 'Operands, like 41', act.cec)}</div>
+        <Button size="small" type="tertiary" prefix={<Search size={16} />} onClick={act.cecPoll}>
+          Poll
+        </Button>
+        {sendBtn('Send', act.cec)}
+      </>
+    ),
+    JTAG: (
+      <>
+        <Switch aria-label="Register" value={f.jReg} options={['IR', 'DR']} onChange={set('jReg')} />
+        <div className="w-[104px]">{inp('jLen', 'Length', 'Length', undefined, { suffix: 'bits', mono: false })}</div>
+        <div className="min-w-0 flex-1">{inp('jVal', 'Value', 'Hex value', act.jShift)}</div>
+        <Button size="small" type="tertiary" prefix={<RefreshCw size={16} />} onClick={act.jReset}>
+          Reset TAP
+        </Button>
+        {sendBtn('Shift', act.jShift)}
+      </>
+    ),
+    SWD: (
+      <>
+        <Switch aria-label="Port" value={f.sPort} options={['DP', 'AP']} onChange={set('sPort')} />
+        <div className="w-[200px]">{sel('sAddr', 'Register', SWD_REGS)}</div>
+        <div className="min-w-0 flex-1">{inp('sVal', 'Value', '32-bit hex value', act.sWrite)}</div>
+        <Button size="small" type="secondary" onClick={act.sRead}>
+          Read
+        </Button>
+        {sendBtn('Write', act.sWrite)}
+      </>
+    ),
+    AVR: (
+      <>
+        <div className="w-60">{sel('aCmd', 'Command', AVR_CMDS)}</div>
+        <div className="min-w-0 flex-1">{inp('aAddr', 'Address', 'Hex address', act.aRun)}</div>
+        {sendBtn('Run', act.aRun)}
+      </>
+    )
+  }
+
+  const ls = (k: keyof Fields, label: string, options: readonly string[]) => <LabeledSelect label={label} value={String(f[k])} options={options} onValueChange={(v) => set(k)(v as never)} />
+  const li = (k: keyof Fields, label: string, suffix?: string, isMono?: boolean) => <LabeledInput label={label} value={String(f[k])} suffix={suffix} className={isMono ? mono : undefined} onChange={(e) => set(k)(e.target.value as never)} />
+  const tg = (k: keyof Fields, label: string) => (
+    <Toggle checked={!!f[k]} onChange={(v) => set(k)(v as never)}>
+      {label}
+    </Toggle>
+  )
+  const modeSwitch = (k: 'spiMode' | 'i2cMode') => (
+    <div className="flex flex-col gap-2">
+      <span className="text-[13px] leading-4 text-gray-900">Mode</span>
+      <Switch aria-label="Mode" value={f[k]} options={['Spy', 'Master']} onChange={set(k)} />
+    </div>
+  )
+
+  const panels: Record<Tab, ReactNode> = {
+    UART: (
+      <PanelSection title="Port">
+        <Grid2>
+          {li('uBaud', 'Baud Rate', 'bit/s')}
+          {ls('uBits', 'Data Bits', ['8', '7', '6', '5'])}
+          {ls('uPar', 'Parity', ['None', 'Even', 'Odd', 'Mark', 'Space'])}
+          {ls('uStop', 'Stop Bits', ['1', '1.5', '2'])}
+          {ls('uTx', 'TX Pin', PINS)}
+          {ls('uRx', 'RX Pin', PINS)}
+          {ls('uPol', 'Polarity', ['Normal', 'Inverted'])}
+        </Grid2>
+      </PanelSection>
+    ),
+    SPI: (
+      <>
+        <PanelSection title="Bus">
+          {modeSwitch('spiMode')}
+          <Grid2>
+            {ls('spiCs', 'Select', PINS)}
+            {ls('spiClk', 'Clock', PINS)}
+            {ls('spiMosi', 'Data 0 (MOSI)', PINS)}
+            {ls('spiMiso', 'Data 1 (MISO)', PINS)}
+          </Grid2>
+        </PanelSection>
+        <PanelSection title="Timing">
+          <Grid2>
+            {li('spiHz', 'Frequency', 'MHz')}
+            {ls('spiCpol', 'SPI Mode', ['Mode 0', 'Mode 1', 'Mode 2', 'Mode 3'])}
+            {ls('spiOrder', 'Bit Order', ['MSB First', 'LSB First'])}
+            {ls('spiLines', 'Data Lines', ['Standard', 'Three-Wire', 'Dual', 'Quad'])}
+          </Grid2>
+        </PanelSection>
+      </>
+    ),
+    I2C: (
+      <PanelSection title="Bus">
+        {modeSwitch('i2cMode')}
+        <Grid2>
+          {ls('i2cScl', 'SCL', PINS)}
+          {ls('i2cSda', 'SDA', PINS)}
+          {li('i2cHz', 'Rate', 'kHz')}
+        </Grid2>
+        {tg('i2cStretch', 'Clock Stretching')}
+      </PanelSection>
+    ),
+    CAN: (
+      <>
+        <PanelSection title="Bus">
+          <Grid2>
+            {ls('canTx', 'TX', PINS)}
+            {ls('canRx', 'RX', PINS)}
+            {li('canRate', 'Rate', 'kbit/s')}
+            {ls('canPol', 'Polarity', ['Normal', 'Inverted'])}
+          </Grid2>
+          {tg('canSpy', 'Spy on Bus')}
+        </PanelSection>
+        <PanelSection title="Frame">
+          {tg('canExt', 'Extended ID')}
+          {tg('canRtr', 'Remote Frame')}
+        </PanelSection>
+      </>
+    ),
+    CEC: (
+      <PanelSection title="Bus">
+        <Grid2>
+          {ls('cecPin', 'CEC Pin', PINS)}
+          {ls('cecOwn', 'Own Address', CEC_ADDR)}
+        </Grid2>
+        {tg('cecSpy', 'Spy on Bus')}
+        <Note type="secondary" size="small">
+          CEC is a single open-drain line. Use a level shifter for the 3.3 V HDMI CEC pin.
+        </Note>
+      </PanelSection>
+    ),
+    JTAG: (
+      <>
+        <PanelSection title="Pins">
+          <Grid2>
+            {ls('jTck', 'TCK', PINS)}
+            {ls('jTms', 'TMS', PINS)}
+            {ls('jTdi', 'TDI', PINS)}
+            {ls('jTdo', 'TDO', PINS)}
+          </Grid2>
+        </PanelSection>
+        <PanelSection title="Timing">
+          <Grid2>
+            {li('jHz', 'Frequency', 'MHz')}
+            {ls('jEdge', 'TDO Sample', ['Rising', 'Falling'])}
+          </Grid2>
+        </PanelSection>
+      </>
+    ),
+    SWD: (
+      <>
+        <PanelSection title="Pins">
+          <Grid2>
+            {ls('sClk', 'SWCLK', PINS)}
+            {ls('sIo', 'SWDIO', PINS)}
+            {ls('sRst', 'nRESET', ['None', ...PINS])}
+          </Grid2>
+        </PanelSection>
+        <PanelSection title="Timing">
+          <Grid2>
+            {li('sHz', 'Frequency', 'MHz')}
+            {li('sTurn', 'Turnaround', 'cycles')}
+          </Grid2>
+        </PanelSection>
+      </>
+    ),
+    AVR: (
+      <>
+        <PanelSection title="Chip">
+          {ls('aChip', 'Chip', Object.keys(CHIPS))}
+          <Grid2>
+            {ls('aRst', 'RESET', PINS)}
+            {ls('aSck', 'SCK', PINS)}
+            {ls('aMosi', 'MOSI', PINS)}
+            {ls('aMiso', 'MISO', PINS)}
+            {li('aHz', 'SCK Frequency', 'kHz')}
+          </Grid2>
+        </PanelSection>
+        <PanelSection title="Fuses">
+          <Grid2>
+            {li('aLfuse', 'Low', undefined, true)}
+            {li('aHfuse', 'High', undefined, true)}
+            {li('aEfuse', 'Extended', undefined, true)}
+            {li('aLock', 'Lock', undefined, true)}
+          </Grid2>
+          <div className="flex gap-2">
+            <Button size="small" type="secondary" onClick={() => { if (device() && need(avr, 'Not in programming mode', 'Press Read Signature first.')) push('AVR', [{ d: 'RX', x: `Fuses Low ${f.aLfuse} · High ${f.aHfuse} · Extended ${f.aEfuse} · Lock ${f.aLock}` }]) }}>
+              Read
+            </Button>
+            <Button size="small" type="secondary" onClick={act.aFuseW}>
+              Write Fuses
+            </Button>
+          </div>
+        </PanelSection>
+        <PanelSection title="Flash">
+          <div className="flex gap-2">
+            <div className="min-w-0 flex-1">{inp('aFile', 'HEX File', 'HEX file')}</div>
+            <Button size="small" type="secondary" prefix={<FolderOpen size={16} />} onClick={() => { setF((x) => ({ ...x, aFile: '~/avr/firmware.hex' })); toast('Chose firmware.hex') }}>
+              Browse
+            </Button>
+          </div>
+          <Progress value={pct} aria-label="Flash progress" />
+          <div className="flex flex-wrap gap-2">
+            <Button size="small" prefix={<Upload size={16} />} disabled={!!busy} onClick={() => act.aProg('Program')}>
+              Program
+            </Button>
+            <Button size="small" type="secondary" disabled={!!busy} onClick={() => act.aProg('Verify')}>
+              Verify
+            </Button>
+            <Button size="small" type="tertiary" prefix={<Trash2 size={16} />} disabled={!!busy} onClick={() => act.aProg('Erase')}>
+              Erase Chip
+            </Button>
+          </div>
+        </PanelSection>
+      </>
+    )
+  }
+
+  const panel = (
+    <>
+      {panels[tab]}
+      <div className="p-4">
+        <Note type="secondary" size="small">
+          Protocol sends with Patterns and receives with Logic. Those instruments show Busy while it runs.
+        </Note>
+      </div>
+    </>
+  )
+
+  const shown = (l: Line) => {
+    if (isU) return view === 'Hex' && l.d !== '··' ? hexOf(l.x) : l.x
+    return view === 'Raw' && l.raw ? l.raw : l.x
+  }
+
+  return (
+    <SplitPage
+      bar={
+        <PageBar title="Protocol" status={<StatusDot state={stat.state} label={stat.label} />}>
+          <Button size="small" type="secondary" prefix={topBtn.icon} onClick={topBtn.onClick}>
+            {topBtn.text}
+          </Button>
+        </PageBar>
+      }
+      panelId="protocol"
+      panel={panel}
+    >
+      <Tabs tabs={TABS.map((t) => ({ title: t, value: t }))} selected={tab} setSelected={(v) => setTab(v as Tab)} />
+      <div role="group" aria-label={`${tab} console`} className="flex min-h-[320px] flex-[1_1_auto]! flex-col overflow-hidden rounded-medium bg-background-100 shadow-[0_0_0_1px_var(--gray-alpha-400)]">
+        <div className="flex flex-wrap items-center justify-between gap-3 bg-background-200 py-2 pl-3 pr-2 shadow-[inset_0_-1px_0_var(--gray-alpha-400)]">
+          <div className="flex flex-wrap items-center gap-4">
+            <Switch aria-label="Display" value={view} options={isU ? ['ASCII', 'Hex'] : ['Decoded', 'Raw']} onChange={(v) => setViews({ ...views, [tab]: v })} />
+            {tg('ts', 'Timestamps')}
+            {tg('auto', 'Auto-Scroll')}
+          </div>
+          <div className="flex items-center gap-4">
+            <span className="inline-flex items-center gap-1.5 font-mono text-xs tabular-nums text-gray-900">
+              <span className="text-[var(--wf-c1)]">TX</span> {txB} B<span className="mx-1 h-3 w-px bg-gray-alpha-400" />
+              <span className="text-[var(--wf-c2)]">RX</span> {rxB} B
+            </span>
+            <Button type="tertiary" size="small" svgOnly aria-label="Clear Console" tooltip onClick={() => setLogs({ ...logs, [tab]: [] })}>
+              <Trash2 size={16} />
+            </Button>
+          </div>
+        </div>
+        {info.length > 0 && (
+          <div className="flex flex-wrap gap-x-8 gap-y-3 p-3 shadow-[inset_0_-1px_0_var(--gray-alpha-400)]">
+            {info.map((i) => (
+              <Description key={i.k} title={i.k} content={i.v} mono={i.mono} />
+            ))}
+          </div>
+        )}
+        <div ref={logRef} role="log" aria-label={`${tab} log`} className="flex min-h-0 flex-[1_1_auto] flex-col overflow-y-auto py-2 font-mono text-[13px] leading-5">
+          {L.map((l, i) => (
+            <div key={i} className="flex gap-3 px-3 py-0.5">
+              {f.ts && <span className="w-24 flex-none text-gray-700">{l.t}</span>}
+              <span className={`w-5 flex-none text-xs font-medium leading-5 ${l.d === 'TX' ? 'text-[var(--wf-c1)]' : l.d === 'RX' ? 'text-[var(--wf-c2)]' : 'text-gray-700'}`}>{l.d}</span>
+              <span className={`min-w-0 flex-1 whitespace-pre-wrap [overflow-wrap:anywhere] ${l.err ? 'text-red-900' : l.d === '··' ? 'italic text-gray-900' : ''}`}>{shown(l)}</span>
+              {l.r && (
+                <Badge size="sm" variant={l.r === 'ACK' ? 'green-subtle' : 'red-subtle'}>
+                  {l.r}
+                </Badge>
+              )}
+            </div>
+          ))}
+          {L.length === 0 && (
+            <div className="m-auto flex flex-col items-center gap-2 font-sans text-sm text-gray-700">
+              <SquareTerminal size={20} />
+              <p className="m-0">{emptyText}</p>
+            </div>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2 bg-background-100 p-2 shadow-[inset_0_1px_0_var(--gray-alpha-400)]">
+          <span className="pl-1 font-mono text-base text-gray-700" aria-hidden>
+            ›
+          </span>
+          {compose[tab]}
+        </div>
+      </div>
+    </SplitPage>
+  )
+}

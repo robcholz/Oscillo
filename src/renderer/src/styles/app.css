@@ -1,0 +1,65 @@
+@import 'tailwindcss';
+@import '@robcholz/geist/styles.css';
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    overflow: hidden;
+    user-select: none;
+  }
+  /* Text people read or copy stays selectable. */
+  input,
+  textarea,
+  [data-selectable] {
+    user-select: text;
+  }
+}
+
+/* Series colours. Geist keeps blue for links, focus and success, red for errors and amber for warnings,
+   so plotted channels use the categorical scales at step 900, the readable step in both themes. */
+:root,
+[data-theme] {
+  --wf-c1: var(--teal-900);
+  --wf-c2: var(--purple-900);
+  --wf-c3: var(--pink-900);
+  --wf-c4: var(--green-900);
+  --wf-c5: var(--gray-900);
+  --wf-dio: var(--green-900);
+}
+
+/* macOS: the title bar doubles as the window drag region; controls inside it stay clickable. */
+.drag {
+  -webkit-app-region: drag;
+}
+.drag :is(button, a, input, [role='radiogroup'], [role='switch']) {
+  -webkit-app-region: no-drag;
+}
+
+/* Settings > Animations: Reduced, on top of the macOS setting Geist already honours. */
+html[data-motion='reduced'] *,
+html[data-motion='reduced'] *::before,
+html[data-motion='reduced'] *::after {
+  animation-duration: 0s !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0s !important;
+  scroll-behavior: auto !important;
+}
+
+@keyframes wf-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--blue-700) 60%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+}
+
+html.wf-resizing,
+html.wf-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
