@@ -89,7 +89,7 @@ export function MCP() {
   const panel = (
     <>
       <PanelSection title="Transport" actions={<Switch aria-label="Transport" value={m.transport} options={['stdio', 'HTTP']} onChange={(transport) => m.set({ transport })} />}>
-        <Snippet text={m.transport === 'HTTP' ? httpSetup : stdioSetup} onCopy={() => toast('Copied to clipboard')} />
+        <Snippet className="[&_code]:whitespace-pre-wrap [&_code]:[overflow-wrap:anywhere]" text={m.transport === 'HTTP' ? httpSetup : stdioSetup} onCopy={() => toast('Copied to clipboard')} />
         <Note type="secondary" size="small">
           {m.transport === 'HTTP' ? 'Run this to add Oscillo to Claude Code. Other HTTP clients use the same URL and token.' : 'Add this command as a stdio server in Claude Desktop or Codex. It connects to Oscillo while it is open.'}
         </Note>

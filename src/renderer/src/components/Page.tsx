@@ -93,7 +93,7 @@ export function LabeledSelect({ label, ...rest }: Omit<SelectProps, 'aria-label'
 /** A settings row: label and description on the left, the control on the right. */
 export function OptionRow({ label, description, children, htmlFor }: { label: ReactNode; description?: ReactNode; children: ReactNode; htmlFor?: string }) {
   return (
-    <div className="flex items-center justify-between gap-6 py-3 [&+&]:shadow-[inset_0_1px_0_var(--gray-alpha-200)]">
+    <div className="flex items-center justify-between gap-6 py-3 [&+&]:shadow-[inset_0_1px_0_var(--gray-alpha-400)]">
       <div className="min-w-0">
         <label htmlFor={htmlFor} className="block text-sm font-medium leading-5">
           {label}

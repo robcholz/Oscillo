@@ -212,10 +212,10 @@ export function Logic() {
   const lanes = frames.flatMap(({ it, frames: fr }) =>
     it.kind === 'UART'
       ? [
-          { key: it.id + 'tx', it, label: it.title + ' TX', frames: fr.filter((f) => f.mo) },
-          { key: it.id + 'rx', it, label: it.title + ' RX', frames: fr.filter((f) => f.mi) }
+          { key: it.id + 'tx', it, label: it.title, dir: 'TX', frames: fr.filter((f) => f.mo) },
+          { key: it.id + 'rx', it, label: it.title, dir: 'RX', frames: fr.filter((f) => f.mi) }
         ]
-      : [{ key: it.id, it, label: it.title, frames: fr }]
+      : [{ key: it.id, it, label: it.title, dir: '', frames: fr }]
   )
   const clk = pulseStats(cap.signals.SCK)
 
@@ -490,12 +490,12 @@ export function Logic() {
               </div>
             )
           })}
-          {lanes.map(({ key, it, label, frames: fr }) => (
+          {lanes.map(({ key, it, label, dir, frames: fr }) => (
             <div key={key} className={grid} style={{ height: rowH + 8 }}>
               <ChevronDown size={16} className="text-gray-700" aria-hidden />
               <span className="font-mono text-xs text-gray-900">{it.kind}</span>
               <span className="truncate text-[13px] font-medium" title={label}>{label}</span>
-              <span className="text-xs text-gray-900">Interpreter</span>
+              <span className="text-xs text-gray-900">{dir ? `${dir} Interpreter` : 'Interpreter'}</span>
               {frameRow(fr, `No ${it.kind} frames on ${it.pins.split(',')[0]}`)}
             </div>
           ))}
