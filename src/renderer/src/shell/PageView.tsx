@@ -3,10 +3,20 @@ import type { ComponentType } from 'react'
 import { PageBar } from '../components/Page'
 import { pageById, type PageId } from '../routes'
 import { useStore } from '../store'
+import { DMM } from '../views/DMM'
+import { Logger } from '../views/Logger'
 import { Scope } from '../views/Scope'
+import { Supplies } from '../views/Supplies'
+import { Voltmeter } from '../views/Voltmeter'
+import { Wavegen } from '../views/Wavegen'
 
 const views: Partial<Record<PageId, ComponentType>> = {
-  scope: Scope
+  scope: Scope,
+  wavegen: Wavegen,
+  supplies: Supplies,
+  voltmeter: Voltmeter,
+  dmm: DMM,
+  logger: Logger
 }
 
 export function PageView() {

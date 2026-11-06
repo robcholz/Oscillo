@@ -25,7 +25,8 @@ export function si(value: number, unit = '', digits = 3): string {
 /** Fixed decimals with a unit, e.g. fixed(1.9023, 'V', 3) → "1.902 V". */
 export function fixed(value: number, unit = '', decimals = 3): string {
   if (!Number.isFinite(value)) return '—'
-  return value.toFixed(decimals) + (unit ? ' ' + unit : '')
+  const txt = value.toFixed(decimals)
+  return (/^-0\.?0*$/.test(txt) ? txt.slice(1) : txt) + (unit ? ' ' + unit : '')
 }
 
 /** Axis tick label: the ends carry the unit, the inner ticks don't. */
