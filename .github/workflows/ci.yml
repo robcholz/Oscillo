@@ -7,6 +7,8 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  # Typecheck, tests and the bundle run on Linux: those runners are plentiful, while
+  # hosted macOS runners sometimes are never assigned and the run fails after 15 minutes.
   check:
     runs-on: ubuntu-latest
     steps:
@@ -18,5 +20,33 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm rebuild electron esbuild
       - run: npm run typecheck
-      - run: npm test --if-present
+      - run: npm test
       - run: npm run build
+  # Packaging needs macOS.
+  package-mac:
+    needs: check
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: node scripts/copy-dwf.mjs --check
+      - run: npm run build
+      - run: npx electron-builder --mac --dir
+      - name: Check the app bundle
+        run: |
+          version=$(node -p "require('./package.json').version")
+          app=$(ls -d dist/mac*/Oscillo.app)
+          for key in CFBundleShortVersionString CFBundleVersion; do
+            got=$(/usr/libexec/PlistBuddy -c "Print :$key" "$app/Contents/Info.plist")
+            echo "$key=$got"
+            [ "$got" = "$version" ] || { echo "::error::$key is $got, expected $version"; exit 1; }
+          done
+          # The WaveForms SDK and the app icon ship inside the bundle.
+          test -f "$app/Contents/Frameworks/dwf.framework/dwf" || { echo "::error::dwf.framework is missing from the app"; exit 1; }
+          icon=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIconFile" "$app/Contents/Info.plist")
+          test -f "$app/Contents/Resources/${icon%.icns}.icns" || { echo "::error::App icon $icon is missing"; exit 1; }
