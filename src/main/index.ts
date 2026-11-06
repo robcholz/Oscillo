@@ -43,6 +43,8 @@ function createWindow(): void {
     show: false,
     backgroundColor: windowBackground(),
     title: 'Oscillo',
+    // Linux and Windows window icon; macOS uses the app bundle's.
+    icon: join(app.getAppPath(), 'build', 'icon.png'),
     titleBarStyle: 'hiddenInset',
     // Centred in the 56px title bar, 20px from the left edge.
     trafficLightPosition: { x: 20, y: 20 },
@@ -100,6 +102,8 @@ if (stdio) {
   const first = workspaceArg(process.argv)
   if (first) toOpen.push(first)
   app.whenReady().then(() => {
+    // Packaged builds take the icon from build/icon.icns; in development the dock shows Electron's.
+    if (!app.isPackaged) app.dock?.setIcon(join(app.getAppPath(), 'build', 'icon.png'))
     const hw = registerHardware()
     registerFiles()
     registerCalibration(hw)
