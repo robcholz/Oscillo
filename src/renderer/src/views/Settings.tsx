@@ -42,7 +42,7 @@ const SHORTCUTS: { a: string; k: string[][] }[] = [
 ]
 
 const COMMANDS = (exe: string) => [
-  { label: 'Open a Workspace', desc: 'Starts with the workspace and its instruments.', cmd: `"${exe}" ~/Documents/Oscillo/Workspaces/Bench.oscillo` },
+  { label: 'Open a Workspace', desc: 'Starts with the workspace and its instruments.', cmd: `"${exe}" ~/"Library/Application Support/Oscillo/Workspaces/Bench.oscillo"` },
   { label: 'Run a Script', desc: 'No window. Prints the console; the exit code is 0 when the script finishes.', cmd: `"${exe}" --script measure.ts --timeout 60` },
   { label: 'Let a Script Use the Network and Files', desc: 'Adds fetch and lets File open any path.', cmd: `"${exe}" --script upload.ts --allow-net` },
   { label: 'MCP Over Stdio', desc: 'For MCP clients that launch their server. Oscillo must be running.', cmd: `"${exe}" --mcp-stdio` }

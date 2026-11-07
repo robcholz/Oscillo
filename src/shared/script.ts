@@ -36,7 +36,7 @@ export interface RunOptions {
   breakpoints: Record<string, number[]>
   /** Allow fetch(). */
   network: boolean
-  /** Let File open any path, not only names in Documents/Oscillo. */
+  /** Let File open any path, not only names in Application Support/Oscillo. */
   anyPath?: boolean
 }
 
@@ -61,7 +61,7 @@ export interface ScriptApi {
   breakpoints(bps: Record<string, number[]>): Promise<void>
   /** Opens the folder scripts write files to. */
   folder(): Promise<string>
-  /** Saves the workspace's scripts to Documents/Oscillo/Scripts, for running from a terminal. */
+  /** Saves the workspace's scripts to Application Support/Oscillo/Scripts, for running from a terminal. */
   sync(files: Record<string, string>): Promise<void>
   onEvent(fn: (e: ScriptEvent) => void): () => void
 }

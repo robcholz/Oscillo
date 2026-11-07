@@ -235,7 +235,7 @@ export const useScript = create<ScriptState>()(
   )
 )
 
-// Keep a copy on disk (Documents/Oscillo/Scripts) so scripts also run from a terminal.
+// Keep a copy on disk (Application Support/Oscillo/Scripts) so scripts also run from a terminal.
 if (api) {
   let timer: ReturnType<typeof setTimeout> | undefined
   let last: Record<string, string> | null = null

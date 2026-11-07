@@ -73,7 +73,7 @@ export function registerMcp(hw: Hardware, runScript: ScriptRunner): void {
   const sessions = new Map<string, Session>()
   const transports = new Map<string, StreamableHTTPServerTransport>()
   const pending = new Map<string, (ok: boolean, session: boolean) => void>()
-  const dataDir = join(app.getPath('documents'), 'Oscillo')
+  const dataDir = join(app.getPath('userData'))
   const send = (e: McpEvent) => BrowserWindow.getAllWindows().forEach((w) => w.webContents.send(MCP.event, e))
   const mirror = (e: ScriptEvent) => settings?.mirror && BrowserWindow.getAllWindows().forEach((w) => w.webContents.send(SCRIPT.event, e))
   const api = () => createApi({ hw, dataDir, apply: (apply) => mirror({ type: 'apply', apply }) })

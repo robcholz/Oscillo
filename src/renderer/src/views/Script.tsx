@@ -133,7 +133,7 @@ export function Script() {
         </Grid2>
       </PanelSection>
       <PanelSection title="Run from Terminal" className="shadow-none">
-        <p className="m-0 text-[13px] leading-[18px] text-gray-900">Runs the open script without the window, with the options above. Scripts are saved to Documents/Oscillo/Scripts.</p>
+        <p className="m-0 text-[13px] leading-[18px] text-gray-900">Runs the open script without the window, with the options above. Scripts are saved to Application Support/Oscillo/Scripts.</p>
         <Snippet className="[&_code]:whitespace-pre-wrap [&_code]:[overflow-wrap:anywhere]" text={`${exe} --script ${s.cur}${s.sandbox === 'Allow Network' ? ' --allow-net' : s.sandbox === 'Allow Files' ? ' --allow-files' : ''}${s.timeout === '30 s' ? '' : s.timeout === 'None' ? ' --timeout 0' : ' --timeout 300'}`} />
       </PanelSection>
     </>

@@ -18,7 +18,7 @@ const D = {
   instrument: 'Oscilloscope' as Instrument,
   save: 'Every Capture' as LogWhen,
   pattern: '{instrument}_{index:4}_{date:yyyy-MM-dd_HHmmss}.csv',
-  folder: '~/Documents/Oscillo/Logs',
+  folder: '~/Library/Application Support/Oscillo/Logs',
   withData: true
 }
 export type E = typeof D

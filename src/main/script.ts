@@ -67,7 +67,7 @@ export type ScriptRunner = (files: Record<string, string>, entry: string, opts: 
 
 export function registerScript(hw: Hardware): ScriptRunner {
   let run: Run | null = null
-  const dataDir = join(app.getPath('documents'), 'Oscillo')
+  const dataDir = join(app.getPath('userData'))
 
   ipcMain.handle(SCRIPT.sync, (_e, files: Record<string, string>) => {
     const dir = join(dataDir, 'Scripts')
@@ -145,7 +145,7 @@ export function registerScript(hw: Hardware): ScriptRunner {
       const timeout = opts.timeout ? new Promise<never>((_, rej) => setTimeout(() => (r.stop(), rej(new Error(`Stopped after the ${opts.timeout} s timeout`))), opts.timeout * 1000)) : null
       await (timeout ? Promise.race([load(entry, []), timeout]) : load(entry, []))
       const files_ = [...wrote].map((p) => p.split('/').pop())
-      emit({ type: 'console', kind: 'info', text: `Finished in ${((Date.now() - started) / 1000).toFixed(1)} s${files_.length ? `. Wrote ${files_.join(', ')} to Documents/Oscillo` : ''}` })
+      emit({ type: 'console', kind: 'info', text: `Finished in ${((Date.now() - started) / 1000).toFixed(1)} s${files_.length ? `. Wrote ${files_.join(', ')} to Application Support/Oscillo` : ''}` })
       emit({ type: 'done', ok: true })
     } catch (err) {
       if (err instanceof Stop) emit({ type: 'done', ok: false, stopped: true, file: r.at.file, line: r.at.line })
@@ -163,11 +163,11 @@ export function registerScript(hw: Hardware): ScriptRunner {
 }
 
 /**
- * Runs a script from Documents/Oscillo/Scripts (or a path) on the first free real device, else the
+ * Runs a script from Application Support/Oscillo/Scripts (or a path) on the first free real device, else the
  * Demo Device, printing its console. Returns the exit code.
  */
 export async function runCli(hw: Hardware, name: string, opts: Omit<RunOptions, 'breakpoints'>): Promise<number> {
-  const dir = join(app.getPath('documents'), 'Oscillo', 'Scripts')
+  const dir = join(app.getPath('userData'), 'Scripts')
   const path = isAbsolute(name) ? name : join(dir, name.endsWith('.ts') ? name : name + '.ts')
   if (!existsSync(path)) {
     process.stderr.write(`No script at ${path}. Scripts from the app are saved to ${dir}.\n`)
