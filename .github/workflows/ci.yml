@@ -33,6 +33,13 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      # build/Oscillo.icon is compiled by actool, which needs Xcode 26 or newer.
+      - name: Select Xcode 26
+        run: |
+          xcode=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$xcode" ]; then echo "::error::No Xcode 26 on this runner; the .icon app icon needs it"; exit 1; fi
+          sudo xcode-select -s "$xcode"
+          xcrun actool --version
       - run: npm ci
       - run: node scripts/copy-dwf.mjs --check
       - run: npm run build
@@ -50,3 +57,6 @@ jobs:
           test -f "$app/Contents/Frameworks/dwf.framework/dwf" || { echo "::error::dwf.framework is missing from the app"; exit 1; }
           icon=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIconFile" "$app/Contents/Info.plist")
           test -f "$app/Contents/Resources/${icon%.icns}.icns" || { echo "::error::App icon $icon is missing"; exit 1; }
+          # The layered icon (Default, Dark, Clear, Tinted on macOS 26) lives in Assets.car.
+          [ "$(/usr/libexec/PlistBuddy -c "Print :CFBundleIconName" "$app/Contents/Info.plist")" = Icon ] || { echo "::error::CFBundleIconName is not set"; exit 1; }
+          test -f "$app/Contents/Resources/Assets.car" || { echo "::error::Assets.car is missing"; exit 1; }
