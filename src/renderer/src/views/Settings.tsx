@@ -9,6 +9,7 @@ import { files } from '../files'
 import { useStore } from '../store'
 import { checkRelease, REPO } from '../updates'
 import { useCommand } from '../shell/commands'
+import icon from '../assets/oscillo-icon.png'
 
 
 const SECTIONS = [
@@ -129,6 +130,8 @@ export function Settings() {
   const ua = navigator.userAgent
   const electron = /Electron\/([\d.]+)/.exec(ua)?.[1] ?? '—'
   const chrome = /Chrome\/([\d.]+)/.exec(ua)?.[1] ?? '—'
+  const os = window.oscillo?.platform ?? navigator.platform
+  const platform = ({ darwin: 'macOS', win32: 'Windows', linux: 'Linux' } as Record<string, string>)[os] ?? os
 
   return (
     <>
@@ -286,24 +289,41 @@ export function Settings() {
         open={about}
         onClose={() => setAbout(false)}
         title="About Oscillo"
-        description="An instrument workbench for Digilent Analog Discovery devices."
+        width={440}
         actions={
-          <Button size="small" type="secondary" onClick={() => setAbout(false)}>
-            Close
-          </Button>
+          <>
+            <Button
+              size="small"
+              type="secondary"
+              onClick={() => {
+                const info = `Oscillo ${VERSION}\nElectron ${electron}\nChromium ${chrome}\nPlatform ${platform}`
+                void navigator.clipboard.writeText(info).then(() => app.toast('Version info copied'))
+              }}
+            >
+              Copy Version Info
+            </Button>
+            <Button size="small" onClick={() => setAbout(false)}>
+              Done
+            </Button>
+          </>
         }
       >
-        <dl className="m-0 grid grid-cols-[120px_1fr] gap-x-4 gap-y-2 text-sm">
+        <div className="flex flex-col items-center gap-1 text-center">
+          <img src={icon} width={72} height={72} alt="" className="mb-2 block" />
+          <span className="font-mono text-[13px] leading-5 text-gray-900">Version {VERSION}</span>
+          <p className="m-0 text-sm text-gray-1000">An instrument workbench for Digilent Analog Discovery devices.</p>
+          <span className="text-[13px] leading-5 text-gray-900">© 2026 Finn Sheng</span>
+        </div>
+        <dl className="m-0 grid grid-cols-2 gap-3 border-t border-gray-alpha-400 pt-4 text-sm">
           {[
-            ['Version', VERSION],
-            ['Electron', electron],
-            ['Chromium', chrome],
-            ['Platform', window.oscillo?.platform ?? navigator.platform],
-            ['WaveForms SDK', 'Digilent, bundled']
-          ].map(([k, v]) => (
-            <div key={k} className="contents">
-              <dt className="text-gray-900">{k}</dt>
-              <dd className="m-0 font-mono text-[13px]">{v}</dd>
+            ['Electron', electron, true],
+            ['Chromium', chrome, true],
+            ['Platform', platform, false],
+            ['WaveForms SDK', 'Digilent, bundled', false]
+          ].map(([k, v, mono]) => (
+            <div key={k as string} className="flex flex-col gap-0.5">
+              <dt className="text-[13px] text-gray-900">{k}</dt>
+              <dd className={cn('m-0', mono ? 'font-mono text-[13px]' : 'text-sm')}>{v}</dd>
             </div>
           ))}
         </dl>
