@@ -7,7 +7,7 @@ import { persist } from 'zustand/middleware'
 import { OptionRow, PageBar, ScrollPage } from '../components/Page'
 import { UnitInput } from '../components/UnitInput'
 import type { OptionsReply, OptionsRequest } from '../../../shared/hw'
-import { hw, useDevice, useHardware } from '../devices'
+import { hw, useDevice } from '../devices'
 import { follow, useHwLive } from '../hwsync'
 import { useStore } from '../store'
 
@@ -66,7 +66,7 @@ const toRequest = (o: Opts): OptionsRequest => ({
   triggers: o.trig.map((t) => (t.m === 'Output' ? 4 : 0))
 })
 
-// Pushed whenever an option changes and after connecting, on real hardware.
+// Pushed whenever an option changes and after connecting.
 follow(
   [useOpts],
   () => toRequest(useOpts.getState()),
@@ -83,7 +83,6 @@ export function DeviceOptions() {
   const app = useStore()
   const dev = useDevice()
   const mon = useHwLive((h) => h.monitor)
-  const real = useHardware()
   const applied = useApplied()
   const fmt = (v: number | undefined, f: (x: number) => string) => (v === undefined || !Number.isFinite(v) ? 'Not reported' : f(v))
 
@@ -106,10 +105,7 @@ export function DeviceOptions() {
         </PageBar>
       }
     >
-      {app.device && !real && (
-        <Note size="small">The Demo Device has none of these options. They are kept and applied when you connect real hardware.</Note>
-      )}
-      {real && applied && applied.unsupported.length > 0 && (
+      {applied && applied.unsupported.length > 0 && (
         <Note size="small">
           {dev?.name} does not have {applied.unsupported.join(', ')}. Those settings are kept but have no effect on it.
         </Note>

@@ -11,5 +11,3 @@ export function useInterval(fn: () => void, ms: number, active = true) {
   }, [ms, active])
 }
 
-/** Small gaussian-ish noise for simulated readings. */
-export const jitter = (amount: number) => (Math.random() + Math.random() + Math.random() - 1.5) * amount

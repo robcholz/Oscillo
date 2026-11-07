@@ -1,7 +1,7 @@
 // Oscilloscope settings, remembered with the workspace.
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { ScopeCfg } from '../sim/scope'
+import type { ScopeCfg } from '../../../shared/dsp/scope'
 
 export type ChannelId = 'C1' | 'C2' | 'M1' | 'R1'
 

@@ -30,6 +30,7 @@ export interface ScopeRequest {
   rate: number
   samples: number
   range?: Record<number, number>
+  /** Input offset per channel, volts. Unset channels use 0, so one instrument never inherits another's. */
   offset?: Record<number, number>
   /** 0 decimate, 1 average, 2 min/max, per channel. */
   filter?: Record<number, number>

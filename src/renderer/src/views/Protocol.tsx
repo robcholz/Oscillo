@@ -1,12 +1,12 @@
 // Protocol (board: Protocol). A console per bus (UART, SPI, I2C, CAN, CEC, JTAG, SWD, AVR) with a
-// compose bar that talks to simulated devices, spy modes, and the per-protocol settings panel.
+// compose bar that talks through the device's protocol masters, spy modes, and the per-protocol settings panel.
 import { Badge, Button, Description, Input, Note, Progress, Select, StatusDot, Switch, Tabs, Toggle, type StatusDotState } from '@robcholz/geist'
 import { CornerDownLeft, Cpu, Eye, FolderOpen, Plug, RefreshCw, Search, Square, SquareTerminal, Trash2, Upload, X } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Grid2, LabeledInput, LabeledSelect, PageBar, PanelSection, SplitPage } from '../components/Page'
 import { useInterval } from '../components/useInterval'
 import type { ProtocolCalls } from '../../../shared/hw'
-import { hw, useHardware } from '../devices'
+import { hw } from '../devices'
 import { files } from '../files'
 import { useStore } from '../store'
 
@@ -40,40 +40,10 @@ const F0 = {
 }
 type Fields = typeof F0
 
-const seed: Record<Tab, Line[]> = {
-  UART: [
-    { t: '12:04:31.208', d: 'TX', x: 'AT+RST' },
-    { t: '12:04:31.260', d: 'RX', x: 'OK' },
-    { t: '12:04:32.001', d: 'TX', x: 'AT+GMR' },
-    { t: '12:04:32.044', d: 'RX', x: 'v2.4.0' },
-    { t: '12:04:32.045', d: 'RX', x: 'OK' }
-  ],
-  SPI: [
-    { t: '12:06:01.420', d: 'TX', x: 'Write 9F 00 00 00', raw: 'CS↓  9F 00 00 00' },
-    { t: '12:06:01.421', d: 'RX', x: 'Read EF 40 18 · JEDEC ID, Winbond W25Q128', raw: 'FF EF 40 18  CS↑' }
-  ],
-  I2C: [
-    { t: '12:06:01.420', d: 'TX', x: 'Write 0x48: 01 60', raw: 'S 90 A 01 A 60 A P', r: 'ACK' },
-    { t: '12:06:02.010', d: 'TX', x: 'Read 0x50', raw: 'S A1 N P', r: 'NAK' }
-  ],
-  CAN: [
-    { t: '12:06:05.100', d: 'TX', x: 'ID 0x123 · DLC 4 · DE AD BE EF', raw: '123 0 4 DE AD BE EF CRC 3A51', r: 'ACK' },
-    { t: '12:06:05.104', d: 'RX', x: 'ID 0x7E8 · DLC 4 · 02 41 0D 32', raw: '7E8 0 4 02 41 0D 32 CRC 1F07', r: 'ACK' }
-  ],
-  CEC: [
-    { t: '12:07:10.002', d: 'TX', x: 'Playback 1 → TV · Give Physical Address', raw: '40:83', r: 'ACK' },
-    { t: '12:07:10.031', d: 'RX', x: 'TV → Broadcast · Report Physical Address 0.0.0.0', raw: '0F:84:00:00:00' }
-  ],
-  JTAG: [],
-  SWD: [],
-  AVR: []
-}
-
 const now = () => {
   const d = new Date()
   return d.toLocaleTimeString('en-GB', { hour12: false }) + '.' + String(d.getMilliseconds()).padStart(3, '0')
 }
-const rndHex = (n: number) => Array.from({ length: n }, () => Math.floor(Math.random() * 256).toString(16).toUpperCase().padStart(2, '0')).join(' ')
 const bytes = (s: string) => s.trim().split(/[\s,]+/).filter(Boolean)
 const isHex = (s: string) => bytes(s).every((b) => /^(0x)?[0-9a-f]{1,2}$/i.test(b))
 const hexOf = (s: string) => [...s].map((c) => c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')).join(' ')
@@ -86,8 +56,7 @@ export function Protocol() {
   const toast = app.toast
   const [tab, setTab] = useState<Tab>(memo?.tab ?? 'UART')
   const [f, setF] = useState<Fields>(memo?.f ?? F0)
-  const real = useHardware()
-  const [logs, setLogs] = useState<Record<Tab, Line[]>>(memo?.logs ?? (real ? { UART: [], SPI: [], I2C: [], CAN: [], CEC: [], JTAG: [], SWD: [], AVR: [] } : seed))
+  const [logs, setLogs] = useState<Record<Tab, Line[]>>(memo?.logs ?? { UART: [], SPI: [], I2C: [], CAN: [], CEC: [], JTAG: [], SWD: [], AVR: [] })
   const [open, setOpen] = useState(true)
   const [views, setViews] = useState<Record<string, string>>({})
   const [chain, setChain] = useState<string[][] | null>(null)
@@ -115,170 +84,7 @@ export function Protocol() {
   }
   const device = () => need(!!app.device, 'No device connected', 'Connect a device, then try again.')
 
-  // Spy modes: traffic arrives about once a second.
-  useInterval(() => {
-    if (tab === 'SPI' && spy.SPI) push('SPI', [{ d: 'RX', x: 'MOSI 03 00 10 00 · MISO ' + rndHex(4), raw: 'CS↓ 03 00 10 00 | ' + rndHex(4) + ' CS↑' }])
-    if (tab === 'I2C' && spy.I2C) {
-      const t = Math.random() * 25 + 20
-      const v = Math.round(t * 16).toString(16).toUpperCase().padStart(3, '0')
-      push('I2C', [{ d: 'RX', x: `Read 0x48: ${v.slice(0, 2)} ${v[2]}0 · ${t.toFixed(2)} °C`, raw: 'S 91 A ' + rndHex(2) + ' N P', r: 'ACK' }])
-    }
-    if (tab === 'CAN' && spy.CAN) {
-      const id = ['0x0C0', '0x1A4', '0x7E8'][Math.floor(Math.random() * 3)]
-      const d = rndHex(8)
-      push('CAN', [{ d: 'RX', x: `ID ${id} · DLC 8 · ${d}`, raw: `${id.slice(2)} 0 8 ${d}`, r: 'ACK' }])
-    }
-    if (tab === 'CEC' && spy.CEC && Math.random() < 0.4) push('CEC', [{ d: 'RX', x: 'TV → Audio System · Give Audio Status', raw: '05:71', r: 'ACK' }])
-  }, 1100, !!app.device && !!spy[tab])
-
-  const act = {
-    uart: () => {
-      if (!device() || !need(open, 'Port is closed', 'Open the port, then send again.') || !f.draft) return
-      const cmd = f.draft
-      push('UART', [{ d: 'TX', x: cmd }])
-      setF((x) => ({ ...x, draft: '' }))
-      const c = cmd.trim().toUpperCase()
-      const r = c === 'AT' ? ['OK'] : c === 'AT+RST' ? ['OK', 'ready'] : c === 'AT+GMR' ? ['v2.4.0', 'OK'] : c.startsWith('AT+') ? ['ERROR'] : [cmd]
-      setTimeout(() => push('UART', r.map((x) => ({ d: 'RX' as const, x, err: x === 'ERROR' }))), 60)
-    },
-    spi: () => {
-      if (!device()) return
-      if (!need(isHex(f.spiW), 'Write bytes are not hex', 'Use bytes like 9F 00 00 00.')) return
-      const w = bytes(f.spiW).map((b) => b.replace(/^0x/i, '').toUpperCase().padStart(2, '0'))
-      const n = Math.max(0, Math.min(256, Number(f.spiR) || 0))
-      const jedec = w[0] === '9F'
-      const read = jedec ? ['EF', '40', '18'].slice(0, n || 3).join(' ') : rndHex(n)
-      push('SPI', [
-        { d: 'TX', x: 'Write ' + w.join(' '), raw: 'CS↓  ' + w.join(' ') },
-        ...(n ? [{ d: 'RX' as const, x: 'Read ' + read + (jedec ? ' · JEDEC ID, Winbond W25Q128' : ''), raw: 'FF ' + read + '  CS↑' }] : [])
-      ])
-    },
-    i2c: (read: boolean) => {
-      if (!device()) return
-      const a = parseInt(f.i2cAddr, 16)
-      if (!need(a >= 0x08 && a <= 0x77, 'Address out of range', 'Use a 7-bit address from 0x08 to 0x77.')) return
-      if (!need(isHex(f.i2cW), 'Write bytes are not hex', 'Use bytes like 01 60.')) return
-      const ack = a === 0x48 || a === 0x68
-      const addr = '0x' + a.toString(16).toUpperCase().padStart(2, '0')
-      const w = bytes(f.i2cW).join(' ').toUpperCase()
-      const lines: Omit<Line, 't'>[] = [{ d: 'TX', x: `Write ${addr}: ${w}`, raw: `S ${(a << 1).toString(16).toUpperCase()} ${ack ? 'A' : 'N'} ${ack ? w.split(' ').join(' A ') + ' A' : ''} P`, r: ack ? 'ACK' : 'NAK' }]
-      if (read && ack) {
-        const n = Math.max(1, Math.min(32, Number(f.i2cR) || 1))
-        const d = a === 0x48 ? ['19', '80', ...Array(30).fill('00')].slice(0, n).join(' ') + (n >= 2 ? ' · 25.50 °C' : '') : rndHex(n)
-        lines.push({ d: 'RX', x: `Read ${addr}: ${d}`, raw: `Sr ${((a << 1) | 1).toString(16).toUpperCase()} A ${d.split(' · ')[0]} N P`, r: 'ACK' })
-      }
-      push('I2C', lines)
-    },
-    scan: () => {
-      if (!device()) return
-      push('I2C', [{ d: '··', x: 'Scanning 0x08 to 0x77…' }])
-      setBusy('Scanning')
-      setTimeout(() => {
-        push('I2C', [{ d: 'RX', x: 'Found 2 devices: 0x48 (TMP102), 0x68 (DS3231)', r: 'ACK' }])
-        setBusy('')
-      }, 700)
-    },
-    can: () => {
-      if (!device()) return
-      const d = bytes(f.canD)
-      if (!need(isHex(f.canD) && d.length <= 8, 'Data is not valid', 'Use up to 8 hex bytes, like DE AD BE EF.')) return
-      const id = f.canId.toUpperCase().replace('0X', '0x')
-      push('CAN', [{ d: 'TX', x: `ID ${id} · DLC ${d.length}${f.canRtr ? ' · Remote' : ''} · ${d.join(' ').toUpperCase()}`, raw: `${id.slice(2)} ${f.canExt ? 1 : 0} ${d.length} ${d.join(' ').toUpperCase()} CRC ${rndHex(2).replace(' ', '')}`, r: 'ACK' }])
-    },
-    cec: () => {
-      if (!device()) return
-      const from = f.cecOwn.split(' · ')[1]
-      const to = f.cecTo.split(' · ')[1]
-      const op = f.cecOp.split(' · ')
-      push('CEC', [{ d: 'TX', x: `${from} → ${to} · ${op[1]}${f.cecArg ? ' ' + f.cecArg : ''}`, raw: `${f.cecOwn[0]}${f.cecTo.split(' ')[0] === '15' ? 'F' : f.cecTo[0]}:${op[0].slice(2)}${f.cecArg ? ':' + bytes(f.cecArg).join(':') : ''}`, r: 'ACK' }])
-      if (op[0] === '0x83') setTimeout(() => push('CEC', [{ d: 'RX', x: `${to} → Broadcast · Report Physical Address 0.0.0.0`, raw: '0F:84:00:00:00' }]), 40)
-      if (op[0] === '0x8F') setTimeout(() => push('CEC', [{ d: 'RX', x: `${to} → ${from} · Report Power Status On`, raw: `0${f.cecOwn[0]}:90:00` }]), 40)
-    },
-    cecPoll: () => {
-      if (!device()) return
-      push('CEC', [{ d: '··', x: 'Polling logical addresses…' }, { d: 'RX', x: 'Present: 0 · TV, 5 · Audio System', r: 'ACK' }])
-    },
-    jScan: () => {
-      if (!device()) return
-      setBusy('Scanning Chain')
-      setTimeout(() => {
-        const c = [
-          ['0x4BA00477', 'ARM Cortex-M4 DAP', '4'],
-          ['0x06413041', 'STM32F4 Boundary Scan', '5']
-        ]
-        setChain(c)
-        push('JTAG', [{ d: '··', x: 'Chain scanned: 2 devices, IR total 9 bits' }, ...c.map((d, i) => ({ d: 'RX' as const, x: `Device ${i}: IDCODE ${d[0]} · ${d[1]}`, raw: `DR 32 bits: ${d[0]}` }))])
-        setBusy('')
-      }, 500)
-    },
-    jShift: () => {
-      if (!device()) return
-      if (!need(/^[0-9a-f]+$/i.test(f.jVal), 'Value is not hex', 'Use a hex value like 09.')) return
-      const out = f.jReg === 'IR' ? '01' : Math.floor(Math.random() * 2 ** 31).toString(16).toUpperCase().padStart(8, '0')
-      push('JTAG', [
-        { d: 'TX', x: `Shift ${f.jReg} ${f.jLen} bits: 0x${f.jVal.toUpperCase()}`, raw: `TMS 1100 TDI ${parseInt(f.jVal, 16).toString(2).padStart(Number(f.jLen) || 1, '0')}` },
-        { d: 'RX', x: `TDO 0x${out}`, raw: `TDO ${parseInt(out, 16).toString(2)}` }
-      ])
-    },
-    jReset: () => device() && push('JTAG', [{ d: '··', x: 'TAP reset: TMS high for 5 clocks, now Run-Test/Idle' }]),
-    sConnect: () => {
-      if (!device()) return
-      if (swd) {
-        setSwd(false)
-        return push('SWD', [{ d: '··', x: 'Disconnected' }])
-      }
-      setSwd(true)
-      push('SWD', [{ d: '··', x: 'Line reset and JTAG-to-SWD sequence sent' }, { d: 'RX', x: 'DPIDR 0x2BA01477 · ARM Cortex-M DP v1', raw: 'OK 2BA01477 P1', r: 'ACK' }])
-    },
-    sRead: () => {
-      if (!device() || !need(swd, 'Not connected', 'Press Connect to read the Debug Port ID first.')) return
-      const v = f.sAddr.startsWith('0x0') ? '2BA01477' : f.sAddr.startsWith('0x4') ? 'F0000040' : rndHex(4).replace(/ /g, '')
-      push('SWD', [{ d: 'RX', x: `Read ${f.sPort} ${f.sAddr}: 0x${v}`, raw: `OK ${v}`, r: 'ACK' }])
-    },
-    sWrite: () => {
-      if (!device() || !need(swd, 'Not connected', 'Press Connect to read the Debug Port ID first.')) return
-      if (!need(/^[0-9a-f]{1,8}$/i.test(f.sVal), 'Value is not valid', 'Use up to 8 hex digits.')) return
-      push('SWD', [{ d: 'TX', x: `Write ${f.sPort} ${f.sAddr}: 0x${f.sVal.toUpperCase().padStart(8, '0')}`, raw: `OK ${f.sVal.toUpperCase()}`, r: 'ACK' }])
-    },
-    aSig: () => {
-      if (!device()) return
-      setAvr(true)
-      push('AVR', [{ d: '··', x: 'Programming Enable: AC 53 00 00 → 53 echoed' }, { d: 'RX', x: `Signature ${CHIPS[f.aChip]} · ${f.aChip}`, raw: '30 00 00 xx ×3' }])
-    },
-    aRun: () => {
-      if (!device() || !need(avr, 'Not in programming mode', 'Press Read Signature first.')) return
-      const out: Record<string, string> = {
-        'Read Signature': `${CHIPS[f.aChip]} · ${f.aChip}`,
-        'Read Fuses': `Low ${f.aLfuse} · High ${f.aHfuse} · Extended ${f.aEfuse}`,
-        'Read Lock Bits': f.aLock,
-        'Read Flash Word': `0x${f.aAddr}: 0C 94`,
-        'Read EEPROM Byte': `0x${f.aAddr}: FF`
-      }
-      push('AVR', [{ d: 'RX', x: `${f.aCmd} · ${out[f.aCmd]}` }])
-    },
-    aFuseW: () => {
-      if (!device() || !need(avr, 'Not in programming mode', 'Press Read Signature first.')) return
-      if (!need([f.aLfuse, f.aHfuse, f.aEfuse, f.aLock].every((x) => /^[0-9a-f]{2}$/i.test(x)), 'Fuse values are not valid', 'Use two hex digits for each fuse, like DE.')) return
-      push('AVR', [{ d: 'TX', x: `Wrote fuses Low ${f.aLfuse} · High ${f.aHfuse} · Extended ${f.aEfuse} · Lock ${f.aLock}` }])
-    },
-    aProg: (verb: 'Program' | 'Verify' | 'Erase') => {
-      if (!device() || !need(avr, 'Not in programming mode', 'Press Read Signature first.')) return
-      setBusy(verb === 'Program' ? 'Programming' : verb === 'Verify' ? 'Verifying' : 'Erasing')
-      setPct(0)
-      let p = 0
-      const id = setInterval(() => {
-        p += verb === 'Erase' ? 50 : 10
-        setPct(Math.min(100, p))
-        if (p >= 100) {
-          clearInterval(id)
-          setBusy('')
-          push('AVR', [{ d: '··', x: verb === 'Program' ? `Programmed ${f.aFile}: 924 bytes, verified` : verb === 'Verify' ? 'Flash matches the file: 924 bytes' : 'Chip erased' }])
-        }
-      }, 120)
-    }
-  }
-
-  // Real hardware: the same actions through the device's protocol masters.
+  // Every action goes through the device's protocol masters.
   const pin = (p: string) => Number(/\d+/.exec(p)?.[0] ?? 0)
   const hex2 = (n: number) => n.toString(16).toUpperCase().padStart(2, '0')
   /** Calls the device; on failure logs the error to the console and returns FAIL. */
@@ -312,17 +118,17 @@ export function Protocol() {
         push('CAN', [{ d: 'RX', x: `ID 0x${fr.id.toString(16).toUpperCase()} · DLC ${fr.data.length}${fr.remote ? ' · Remote' : ''} · ${d}`, raw: `${fr.id.toString(16).toUpperCase()} ${fr.extended ? 1 : 0} ${fr.data.length} ${d}`, r: 'ACK' }])
       }
     }
-  }, 150, real && !!app.device && ((isU && open) || (tab === 'CAN' && f.canSpy)))
+  }, 150, !!app.device && ((isU && open) || (tab === 'CAN' && f.canSpy)))
   useEffect(() => {
-    if (real && open && app.device) void uartSetup()
+    if (open && app.device) void uartSetup()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [real, open, app.device, f.uBaud, f.uBits, f.uPar, f.uStop, f.uTx, f.uRx])
+  }, [open, app.device, f.uBaud, f.uBits, f.uPar, f.uStop, f.uTx, f.uRx])
   useEffect(() => {
-    if (real && f.canSpy && app.device) void call('CAN', 'canSetup', { tx: pin(f.canTx), rx: pin(f.canRx), rate: (Number(f.canRate) || 500) * 1e3 })
+    if (f.canSpy && app.device) void call('CAN', 'canSetup', { tx: pin(f.canTx), rx: pin(f.canRx), rate: (Number(f.canRate) || 500) * 1e3 })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [real, f.canSpy, app.device, f.canTx, f.canRx, f.canRate])
+  }, [f.canSpy, app.device, f.canTx, f.canRx, f.canRate])
 
-  const hwAct: Partial<Record<keyof typeof act, (...a: never[]) => unknown>> = {
+  const act = {
     uart: async () => {
       if (!device() || !need(open, 'Port is closed', 'Open the port, then send again.') || !f.draft) return
       const end = f.ending === 'CR LF' ? '\r\n' : f.ending === 'LF' ? '\n' : f.ending === 'CR' ? '\r' : ''
@@ -495,7 +301,7 @@ export function Protocol() {
       }
     }
   }
-  const A = (real ? { ...act, ...hwAct } : act) as typeof act
+  const A = act
 
   const topBtn: { text: string; icon: ReactNode; onClick: () => void } = isU
     ? { text: open ? 'Close Port' : 'Open Port', icon: open ? <X size={16} /> : <Plug size={16} />, onClick: () => { setOpen(!open); push('UART', [{ d: '··', x: !open ? `Port opened at ${f.uBaud} bit/s` : 'Port closed' }]) } }
@@ -504,10 +310,9 @@ export function Protocol() {
           text: spy[tab] ? 'Stop Spy' : 'Start Spy',
           icon: spy[tab] ? <Square size={16} /> : <Eye size={16} />,
           onClick: () => {
-            if (real && tab !== 'CAN') return toast(tab === 'CEC' ? 'CEC is not available on this device yet' : 'Spy runs in the Logic Analyzer', { detail: tab === 'CEC' ? 'CEC needs precise timing on a single pin.' : `Add an ${tab} interpreter there to watch the bus without driving it.` })
+            if (tab !== 'CAN') return toast(tab === 'CEC' ? 'CEC is not available on this device yet' : 'Spy runs in the Logic Analyzer', { detail: tab === 'CEC' ? 'CEC needs precise timing on a single pin.' : `Add an ${tab} interpreter there to watch the bus without driving it.` })
             const on = !spy[tab]
-            const k = ({ SPI: 'spiMode', I2C: 'i2cMode', CAN: 'canSpy', CEC: 'cecSpy' } as const)[tab as 'SPI']
-            setF((x) => ({ ...x, [k]: tab === 'SPI' || tab === 'I2C' ? (on ? 'Spy' : 'Master') : on }) as Fields)
+            setF((x) => ({ ...x, canSpy: on }))
             push(tab, [{ d: '··', x: on ? 'Spying: listening without driving the bus' : 'Spy stopped' }])
           }
         }

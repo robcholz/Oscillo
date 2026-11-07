@@ -10,10 +10,8 @@ import { fixed, si } from '../components/format'
 import { Grid2, LabeledSelect, PageBar, PanelSection, SplitPage } from '../components/Page'
 import { Plot, type Series } from '../components/Plot'
 import { UnitInput } from '../components/UnitInput'
-import { jitter, useInterval } from '../components/useInterval'
-import { impedance, mag, phaseDeg, sweep, type Complex } from '../sim/network'
-import { useHardware } from '../devices'
-import { cdiv, cscale, csub, respond, useSweep } from '../hwsync'
+import { mag, phaseDeg, sweep, type Complex } from '../../../shared/dsp/network'
+import { cdiv, cscale, csub, respond, useSweep, useActive } from '../hwsync'
 import { publish, saveImage, saveTable, type Table as DataTable } from '../files'
 import { toggleLoggingFor, useLoggingOf } from '../logging'
 import { useStore } from '../store'
@@ -145,29 +143,31 @@ export function Impedance() {
   const logging = useLoggingOf('Impedance')
   const toast = app.toast
   const [tab, setTab] = useState<(typeof TABS)[number]>('|Z| and Phase')
-  const [done, setDone] = useState(s.steps)
-  const [tick, setTick] = useState(0)
+  const [single, setSingle] = useState(false)
   const [view, setView] = useState<[number, number] | null>(null)
   const [cursors, setCursors] = useState<number[]>([])
   const [labels, setLabels] = useState<{ f: number; text: string }[]>([])
   const [dialog, setDialog] = useState<null | { title: string; fields: FormField[]; submitLabel: string; onSubmit: (v: Record<string, string>) => void }>(null)
   const live = s.running && app.running && !!app.device
+  useActive('Impedance Analyzer', live || single)
   const log = s.scale === 'Logarithmic'
 
-  const real = useHardware()
-  useInterval(() => (s.mode === 'Sweep' ? setDone((d) => (d >= s.steps ? 1 : d + 1)) : setTick((t) => t + 1)), s.mode === 'Sweep' ? Math.max(10, 2400 / s.steps) : 400, live && !real)
 
   const freqs = useMemo(() => sweep(s.start, s.stop, s.steps, log), [s.start, s.stop, s.steps, log])
-  // A real device: W1 drives C1, then the DUT, then C2 across the reference resistor to ground,
+  // W1 drives C1, then the DUT, then C2 across the reference resistor to ground,
   // so Z = R × (C1 − C2) / C2.
   const meterFreqs = useMemo(() => [s.freq], [s.freq])
-  const hwSweep = useSweep(real && live, s.mode === 'Meter' ? meterFreqs : freqs, async (f) => {
-    const [v1, v2] = await respond(f, { amp: s.amp, offset: s.offset, periods: s.periods, settle: 0 })
-    return cscale(cdiv(csub(v1, v2), v2), s.reference)
-  })
-  const simZ = useMemo(() => freqs.map((f) => impedance(f)), [freqs])
-  const Z = real && s.mode === 'Sweep' ? hwSweep.pts : simZ
-  const n = real && s.mode === 'Sweep' ? hwSweep.done : Math.min(done, s.steps)
+  const hwSweep = useSweep(
+    live || single,
+    s.mode === 'Meter' ? meterFreqs : freqs,
+    async (f) => {
+      const [v1, v2] = await respond(f, { amp: s.amp, offset: s.offset, periods: s.periods, settle: 0 })
+      return cscale(cdiv(csub(v1, v2), v2), s.reference)
+    },
+    { once: single && !live, onDone: () => setSingle(false) }
+  )
+  const Z = s.mode === 'Sweep' ? hwSweep.pts : []
+  const n = s.mode === 'Sweep' ? hwSweep.done : 0
   const Zc = useMemo(() => Z.map((z, i) => compensate(z, freqs[i], s.compZ)), [Z, freqs, s.compZ])
   const D = Zc.slice(0, n).map((z, i) => derived(z, freqs[i]))
   const fx = Float64Array.from(freqs.slice(0, n))
@@ -183,12 +183,8 @@ export function Impedance() {
   const [x0, x1] = view ?? [s.start, s.stop]
   const xAxis = { min: x0, max: x1, unit: 'Hz', label: 'f', log }
 
-  // Meter: one frequency, small noise per reading.
-  const meterZ = useMemo(() => {
-    if (real) return hwSweep.pts[0] ?? { re: 0, im: 0 }
-    const z = impedance(s.freq)
-    return { re: z.re * (1 + jitter(0.0008)), im: z.im * (1 + jitter(0.0008)) }
-  }, [s.freq, tick, real, hwSweep.pts])
+  // Meter: the latest reading at one frequency.
+  const meterZ = hwSweep.pts[0] ?? { re: 0, im: 0 }
   const m = derived(s.mode === 'Meter' ? compensate(meterZ, s.freq, s.compZ) : Zc[n - 1] ?? meterZ, s.mode === 'Meter' ? s.freq : freqs[n - 1])
 
   const run = () => {
@@ -288,7 +284,6 @@ export function Impedance() {
   const compDot: { state: StatusDotState; label: string } = compCount === 3 ? { state: 'READY', label: 'Open, Short and Load applied' } : compCount ? { state: 'BUILDING', label: `${compCount} of 3 steps done` } : { state: 'QUEUED', label: 'Not compensated' }
   const compStep = (k: keyof ImpState['comp'], what: string) => {
     if (!app.device) return toast('No device connected', { detail: 'Connect a device, then run compensation.' })
-    if (!real) return toast('The Demo Device has no fixture to compensate', { detail: 'Compensation measures your probes and adapter on real hardware.' })
     const meter = s.mode === 'Meter'
     const raw = meter ? (hwSweep.pts[0] ? [hwSweep.pts[0]] : []) : hwSweep.done >= s.steps ? hwSweep.pts.slice(0, s.steps) : []
     if (!raw.length) return toast('Wait for a full sweep', { detail: `${what} Then press ${k[0].toUpperCase() + k.slice(1)} once the sweep has finished.` })
@@ -304,9 +299,9 @@ export function Impedance() {
     <>
       <PanelSection title="Sweep">
         <Grid2>
-          <UnitInput label="Start" value={s.start} suffix="Hz" min={1} max={s.stop / 2} onCommit={(start) => { setView(null); setDone(1); s.set({ start }) }} />
-          <UnitInput label="Stop" value={s.stop} scale={1e6} suffix="MHz" min={s.start * 2} max={50e6} onCommit={(stop) => { setView(null); setDone(1); s.set({ stop }) }} />
-          <UnitInput label="Steps" value={s.steps} integer min={2} max={10000} onCommit={(steps) => { setDone(1); s.set({ steps }) }} />
+          <UnitInput label="Start" value={s.start} suffix="Hz" min={1} max={s.stop / 2} onCommit={(start) => { setView(null); s.set({ start }) }} />
+          <UnitInput label="Stop" value={s.stop} scale={1e6} suffix="MHz" min={s.start * 2} max={50e6} onCommit={(stop) => { setView(null); s.set({ stop }) }} />
+          <UnitInput label="Steps" value={s.steps} integer min={2} max={10000} onCommit={(steps) => s.set({ steps })} />
           <LabeledSelect label="Scale" value={s.scale} options={['Logarithmic', 'Linear']} onValueChange={(scale) => { setView(null); s.set({ scale }) }} />
           <UnitInput label="Amplitude" value={s.amp} suffix="V" min={0.001} max={5} onCommit={(amp) => s.set({ amp })} />
           <UnitInput label="Offset" value={s.offset} suffix="V" min={-5} max={5} onCommit={(offset) => s.set({ offset })} />
@@ -362,7 +357,7 @@ export function Impedance() {
       bar={
         <PageBar title="Impedance Analyzer" status={<StatusDot state={live ? (s.mode === 'Sweep' && n < s.steps ? 'BUILDING' : 'READY') : 'QUEUED'} label={live ? (s.mode === 'Meter' ? `Measuring at ${si(s.freq, 'Hz')}` : n < s.steps ? 'Sweeping' : 'Sweep Done') : 'Stopped'} />}>
           <Switch aria-label="Mode" value={s.mode} options={['Meter', 'Sweep'] as const} onChange={(mode) => s.set({ mode })} />
-          <Button size="small" type="secondary" prefix={<StepForward size={16} />} onClick={() => { if (!app.device) return toast('No device connected', { detail: 'Connect a device, then press Single.' }); s.set({ running: false }); setDone(s.steps); setTick(tick + 1) }}>
+          <Button size="small" type="secondary" prefix={<StepForward size={16} />} onClick={() => { if (!app.device) return toast('No device connected', { detail: 'Connect a device, then press Single.' }); s.set({ running: false }); setSingle(true) }}>
             Single
           </Button>
           <Button size="small" prefix={live ? <Square size={16} /> : <Play size={16} />} onClick={run} tooltipKeys={['Space']}>

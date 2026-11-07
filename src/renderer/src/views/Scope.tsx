@@ -15,14 +15,15 @@ import { Grid2, LabeledSelect, PageBar, PanelSection, SplitPage } from '../compo
 import { Cursor } from '../components/Cursor'
 import { Plot, type Series } from '../components/Plot'
 import { UnitInput } from '../components/UnitInput'
-import { histogram, spectrum } from '../sim/dsp'
-import { check } from '../sim/expr'
-import { capture, fromSamples, measure, reference, stats as recordStats, type Capture, type Stats } from '../sim/scope'
-import { hw, useHardware } from '../devices'
+import { histogram, spectrum } from '../../../shared/dsp/dsp'
+import { check } from '../../../shared/dsp/expr'
+import { fromSamples, stats as recordStats, type Capture, type Stats } from '../../../shared/dsp/scope'
+import { hw } from '../devices'
 import { useStore } from '../store'
 import { openTable, publish, saveImage, saveTable, type Table as DataTable } from '../files'
 import { toggleLoggingFor, useLoggingOf } from '../logging'
 import { useScope, type ChannelId } from './scope-store'
+import { useActive } from '../hwsync'
 
 /** Listen: loops the latest capture of one channel through the speakers, at its sample rate. */
 let audio: { ctx: AudioContext; gain: GainNode; src: AudioBufferSourceNode | null } | null = null
@@ -83,6 +84,8 @@ const COLOR: Record<ChannelId, string> = { C1: 'var(--wf-c1)', C2: 'var(--wf-c2)
 const TABS = ['Time', 'XY', 'FFT', 'Histogram', 'Persistence', 'Data', 'Notes'] as const
 const MEASURES = ['Frequency', 'Period', 'Peak to Peak', 'Amplitude', 'AC RMS', 'DC RMS', 'Average', 'Maximum', 'Minimum', 'Rise Time', 'Fall Time', 'Positive Duty', 'Negative Duty', 'Positive Width', 'Overshoot'] as const
 
+const NO_STATS: Stats = { frequency: 0, period: 0, vpp: 0, amplitude: 0, rms: 0, acRms: 0, mean: 0, max: 0, min: 0, rise: 0, fall: 0, dutyPos: 0, widthPos: 0, overshoot: 0 }
+
 function pick(st: Stats, m: string): { v: number; fmt: (v: number) => string } {
   const V = (v: number): string => fixed(v, 'V', 3)
   const pct = (v: number): string => (v * 100).toFixed(1) + '%'
@@ -120,8 +123,9 @@ export function Scope() {
   const app = useStore()
   const cfg = s.cfg
   const live = s.running && app.running && !!app.device
+  useActive('Oscilloscope', live)
   const [tab, setTab] = useState<(typeof TABS)[number]>('Time')
-  const [cap, setCap] = useState<Capture>(() => capture(cfg))
+  const [cap, setCap] = useState<Capture>(() => fromSamples(cfg, 1, null, null))
   const [history, setHistory] = useState<Capture[]>([])
   const [capIndex, setCapIndex] = useState(0)
   const [armed, setArmed] = useState(false)
@@ -138,9 +142,8 @@ export function Scope() {
   // Visible window, zoomed around the trigger position.
   const view = useMemo(() => ({ ...cfg, base: cfg.base / s.zoom }), [cfg, s.zoom])
 
-  const real = useHardware()
   const inflight = useRef(false)
-  // A real device: one capture of both channels across the visible window, at the record length set.
+  // One capture of both channels across the visible window, at the record length set.
   const acquireHardware = async (): Promise<Capture | null> => {
     if (!hw || inflight.current) return null
     inflight.current = true
@@ -199,11 +202,7 @@ export function Scope() {
   }
 
   const acquire = (): void => {
-    if (real) {
-      void acquireHardware().then((c) => c && record(c, (ch) => recordStats(c.t, c[ch])))
-      return
-    }
-    record(capture(view), (ch) => measure(ch, cfg))
+    void acquireHardware().then((c) => c && record(c, (ch) => recordStats(c.t, c[ch])))
   }
   const record = (c: Capture, measureCh: (ch: 'C1' | 'C2' | 'M1') => Stats): void => {
     for (const ch of ['C1', 'C2'] as const) {
@@ -238,10 +237,6 @@ export function Scope() {
     return () => clearInterval(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [live, s.updateMs, view, s.measurements])
-  useEffect(() => {
-    if (!live && !real) setCap(capture(view, 2000, 0.13))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view])
 
   useEffect(() => {
     if (!s.audio.on) return silence()
@@ -255,7 +250,7 @@ export function Scope() {
   useEffect(() => () => silence(), [])
 
   const shown = capIndex > 0 && history.length ? history[history.length - capIndex] ?? cap : cap
-  const r1 = useMemo(() => (ref ? onAxis(ref, shown.t) : real ? new Float64Array(shown.t.length) : reference(shown.t)), [shown.t, ref, real])
+  const r1 = useMemo(() => (ref ? onAxis(ref, shown.t) : new Float64Array(shown.t.length)), [shown.t, ref])
   const mathError = check(cfg.math, ['C1', 'C2', 'R1'])
 
   const toast = app.toast
@@ -329,7 +324,7 @@ export function Scope() {
 
   const measRows = s.measurements.map((m) => {
     const a = stats.current[m.ch + m.m]
-    const unitFmt = pick(measure('C1', cfg), m.m).fmt
+    const unitFmt = pick(NO_STATS, m.m).fmt
     if (m.ch === 'R1') return { id: m.id, ch: m.ch, m: m.m, v: '—', mn: '—', av: '—', mx: '—', n: '—' }
     if (!a) return { id: m.id, ch: m.ch, m: m.m, v: '—', mn: '—', av: '—', mx: '—', n: '0' }
     return { id: m.id, ch: m.ch, m: m.m, v: unitFmt(a.last), mn: unitFmt(a.min), av: unitFmt(a.sum / a.n), mx: unitFmt(a.max), n: a.n.toLocaleString() }
@@ -443,7 +438,6 @@ export function Scope() {
       return (
         <>
           <Plot x={xAxis} y={yAxis} series={probeSeries.map((p, i) => ({ ...p, y: series[i].y }))} ariaLabel="Channel traces" overlay={overlay} onView={(a, b) => { s.set({ zoom: Math.min(1000, Math.max(1, (cfg.base * 10) / (b - a))) }); s.setCfg({ position: (a + b) / 2 }) }} />
-          {s.show.digital && !real && <Digital t={shown.t} />}
         </>
       )
     if (tab === 'XY')
@@ -462,19 +456,19 @@ export function Scope() {
         </>
       )
     if (tab === 'FFT') {
-      const fine = capture({ ...cfg, base: 1e-3, position: 5e-3 }, 8192)
-      const fs = 8192 / 10e-3
-      const a = spectrum(fine.C1, fs)
-      const b = spectrum(fine.C2, fs)
-      const lim = a.f.findIndex((f) => f > 20000)
+      const fs = shown.t.length > 1 ? 1 / (shown.t[1] - shown.t[0]) : 1
+      const a = spectrum(shown.C1, fs)
+      const b = spectrum(shown.C2, fs)
+      const top = Math.min(20000, fs / 2)
+      const lim = Math.max(0, a.f.findIndex((f) => f > top))
       return (
         <>
           <div className="flex flex-wrap gap-2">
-            <LegendItem color={COLOR.C1} label="C1 sine" />
-            <LegendItem color={COLOR.C2} label="C2 square, odd harmonics" />
+            <LegendItem color={COLOR.C1} label={s.names.C1} />
+            <LegendItem color={COLOR.C2} label={s.names.C2} />
           </div>
           <Plot
-            x={{ min: 0, max: 20000, unit: 'Hz', label: 'f', divisions: 4 }}
+            x={{ min: 0, max: top, unit: 'Hz', label: 'f', divisions: 4 }}
             y={{ min: -100, max: 10, unit: 'dBV', divisions: 4, format: (v) => (v === 10 || v === -100 ? v + ' dBV' : String(v)) }}
             series={[
               { id: 'C2', name: 'C2', color: COLOR.C2, x: b.f.subarray(0, lim), y: b.db.subarray(0, lim), unit: 'dBV', width: 1.25 },
@@ -665,7 +659,7 @@ export function Scope() {
               }
             />
           </Entity>
-          <Entity title="R1 · Reference" description={ref?.label ?? (real ? 'Empty. Copy a channel or import a CSV.' : 'Simulated snapshot of C1')} icon={<Copy size={16} />}>
+          <Entity title="R1 · Reference" description={ref?.label ?? 'Empty. Copy a channel or import a CSV.'} icon={<Copy size={16} />}>
             <Toggle checked={s.show.R1} onChange={(on) => s.set({ show: { ...s.show, R1: on } })} aria-label="Show R1" />
             <DotsMenu
               aria-label="R1 Actions"
@@ -686,7 +680,7 @@ export function Scope() {
             />
           </Entity>
           <Entity title="Digital · DIO 0–1" description="Mixed signal from Logic, shared trigger" icon={<Binary size={16} />} className="shadow-none">
-            <Toggle checked={s.show.digital && !real} disabled={real} onChange={(on) => s.set({ show: { ...s.show, digital: on } })} aria-label="Show Digital" />
+            <Toggle checked={false} disabled onChange={(on) => s.set({ show: { ...s.show, digital: on } })} aria-label="Show Digital" />
           </Entity>
         </Material>
       </PanelSection>
@@ -740,7 +734,7 @@ export function Scope() {
                 <MenuContent align="end">
                   <MenuItem prefix={<Sigma size={16} />} onSelect={() => s.set({ show: { ...s.show, M1: true } })}>Math Channel</MenuItem>
                   <MenuItem prefix={<Copy size={16} />} onSelect={() => s.set({ show: { ...s.show, R1: true } })}>Reference Channel</MenuItem>
-                  <MenuItem prefix={<Binary size={16} />} onSelect={() => { if (real) return toast('Digital channels are in the Logic Analyzer', { detail: 'This device captures them there, on their own time base.' }); s.set({ show: { ...s.show, digital: true } }); toast('Digital channels shown') }}>Digital Channels</MenuItem>
+                  <MenuItem prefix={<Binary size={16} />} onSelect={() => toast('Digital channels are in the Logic Analyzer', { detail: 'This device captures them there, on their own time base.' })}>Digital Channels</MenuItem>
                   <MenuItem prefix={<Upload size={16} />} onSelect={() => void importRef()}>Import File…</MenuItem>
                 </MenuContent>
               </MenuRoot>
@@ -869,30 +863,3 @@ export function Scope() {
 }
 
 
-/** DIO 0–1 under the analog plot, sharing its time axis. */
-function Digital({ t }: { t: Float64Array }) {
-  const rows = [
-    { name: 'D0', f: 1000 },
-    { name: 'D1', f: 2000 }
-  ]
-  return (
-    <Material className="flex flex-col gap-1 p-2">
-      {rows.map((r) => {
-        let d = ''
-        for (let i = 0; i < t.length; i += 4) {
-          const hi = ((((t[i] * r.f) % 1) + 1) % 1) < 0.5
-          const x = (i / (t.length - 1)) * 1000
-          d += (i === 0 ? 'M' : 'H') + x.toFixed(1) + (i === 0 ? ',' : 'V') + (hi ? 4 : 24)
-        }
-        return (
-          <div key={r.name} className="grid h-6 grid-cols-[48px_minmax(0,1fr)] items-center gap-2">
-            <span className="font-mono text-xs text-gray-900">{r.name}</span>
-            <svg viewBox="0 0 1000 28" preserveAspectRatio="none" role="img" aria-label={r.name} className="block h-5 w-full">
-              <path d={d} fill="none" stroke="var(--wf-dio)" strokeWidth={1.25} vectorEffect="non-scaling-stroke" />
-            </svg>
-          </div>
-        )
-      })}
-    </Material>
-  )
-}

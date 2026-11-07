@@ -176,7 +176,6 @@ export function createApi(ctx: ApiContext) {
   // Logic
   const logic = {
     async single(o: { rate?: number; samples?: number } = {}) {
-      if (hw.openInfo()?.key === 'DEMO') throw new Error('The Demo Device does not simulate the Logic Analyzer. Connect a real device to capture.')
       const r = await hw.logic({ rate: o.rate ?? 100e6, samples: o.samples ?? 16384 })
       return {
         rate: r.rate,

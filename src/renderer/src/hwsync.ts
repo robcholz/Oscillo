@@ -1,13 +1,13 @@
-// Keeps real hardware in step with the instrument settings, and polls what the device reports back.
-// The Demo Device keeps the renderer's own simulations; everything here runs only on real hardware,
-// except the monitor (temperature, USB power), which the simulated device answers too.
+// Keeps the connected device in step with the instrument settings, and polls what it reports back.
+// The Demo Device is a simulated device in the main process (libs/dwf/src/sim.ts), so it takes the
+// same path as real hardware: nothing in the renderer knows it is simulated.
 import { useEffect, useRef, useState } from 'react'
 import { create } from 'zustand'
 import type { Monitor, ScopeReply, ScopeRequest, WaveRequest } from '../../shared/hw'
 import { deviceById, hw } from './devices'
 import { useStore } from './store'
-import type { WaveType } from './sim/wave'
-import type { Complex } from './sim/network'
+import type { WaveType } from '../../shared/dsp/wave'
+import type { Complex } from '../../shared/dsp/network'
 import type { Reading } from './views/meters'
 
 interface HwLive {
@@ -19,11 +19,24 @@ interface HwLive {
 }
 export const useHwLive = create<HwLive>()(() => ({ meters: null, monitor: null, dio: null }))
 
-/** True when the connected device is real hardware (not the Demo Device). */
-export const isHardware = (): boolean => {
-  const d = deviceById(useStore.getState().device)
-  return !!hw && !!d && d.link !== 'SIM'
+/** Instruments working on the device right now (capturing, sweeping or driving outputs), for the status bar. */
+export const useActivity = create<{ on: Record<string, boolean> }>()(() => ({ on: {} }))
+export function setActive(name: string, on: boolean): void {
+  if (!!useActivity.getState().on[name] === on) return
+  useActivity.setState((s) => ({ on: { ...s.on, [name]: on } }))
 }
+/** Counts a page's instrument as active while `on` and the page is open. */
+export function useActive(name: string, on: boolean): void {
+  useEffect(() => {
+    setActive(name, on)
+    return () => setActive(name, false)
+  }, [name, on])
+}
+/** How many instruments are active. */
+export const useActiveCount = (): number => useActivity((s) => Object.values(s.on).filter(Boolean).length)
+
+/** True when a device is connected. */
+export const connected = (): boolean => !!hw && !!deviceById(useStore.getState().device)
 
 const FUNC: Partial<Record<WaveType, WaveRequest['func']>> = {
   Sine: 'Sine',
@@ -143,9 +156,8 @@ export function startHwSync(): void {
     busy = true
     try {
       const monitor = await hw!.monitor().catch(() => null)
-      const real = isHardware()
-      const dio = real ? await hw!.dioRead().catch(() => null) : null
-      const meters = real && meterUsers > 0 && app.running ? await measure().catch(() => null) : null
+      const dio = await hw!.dioRead().catch(() => null)
+      const meters = meterUsers > 0 && app.running ? await measure().catch(() => null) : null
       useHwLive.setState({ monitor, dio, meters })
     } finally {
       busy = false
@@ -160,9 +172,10 @@ export const resync = (): void => resyncs.forEach((f) => f())
 type Sub = { subscribe: (fn: () => void) => () => void }
 /**
  * Pushes `read()` to the device with `push` whenever it changes, and again after connecting, while
- * real hardware is connected. Failures show as a toast.
+ * a device is connected. Failures show as a toast. With `activity`, the instrument counts as active
+ * (see useActivity) while `activity.on` holds for what was pushed.
  */
-export function follow<T>(stores: Sub[], read: () => T, push: (v: T) => Promise<void>, what: string): void {
+export function follow<T>(stores: Sub[], read: () => T, push: (v: T) => Promise<void>, what: string, activity?: { name: string; on: (v: T) => boolean }): void {
   if (!hw) return
   let last = ''
   let dev: string | null = null
@@ -172,12 +185,20 @@ export function follow<T>(stores: Sub[], read: () => T, push: (v: T) => Promise<
       dev = app.device
       last = ''
     }
-    if (!isHardware()) return
+    if (!connected()) {
+      if (activity) setActive(activity.name, false)
+      return
+    }
     const v = read()
     const key = JSON.stringify(v)
     if (key === last) return
     last = key
-    push(v).catch((e: Error) => app.toast(`Could not update ${what}`, { detail: e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') }))
+    push(v)
+      .then(() => activity && setActive(activity.name, activity.on(v)))
+      .catch((e: Error) => {
+        if (activity) setActive(activity.name, false)
+        app.toast(`Could not update ${what}`, { detail: e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') })
+      })
   }
   for (const s of [useStore, ...stores]) s.subscribe(run)
   resyncs.push(() => {
@@ -257,7 +278,7 @@ export async function respond(f: number, st: Stimulus): Promise<[Complex, Comple
 }
 
 /**
- * Sweeps `freqs` on real hardware while `run`, restarting when done, like the analyzers' own sweep.
+ * Sweeps `freqs` on the device while `run`, restarting when done, like the analyzers' own sweep.
  * `fn` turns each frequency into a point. When the sweep stops, the generator goes back to its
  * Wavegen settings.
  */

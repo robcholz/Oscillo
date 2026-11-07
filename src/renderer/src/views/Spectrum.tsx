@@ -10,10 +10,9 @@ import { fixed, si } from '../components/format'
 import { Grid2, LabeledSelect, PageBar, PanelSection, SplitPage } from '../components/Page'
 import { Plot, type Series } from '../components/Plot'
 import { UnitInput } from '../components/UnitInput'
-import { useInterval } from '../components/useInterval'
-import { analyze, metrics, testSignal, toDbv, WINDOWS, type WindowName } from '../sim/spectrum'
-import { useHardware } from '../devices'
-import { useCapture } from '../hwsync'
+import { analyze, metrics, toDbv, WINDOWS, type WindowName } from '../../../shared/dsp/spectrum'
+import { hw } from '../devices'
+import { useCapture, useActive } from '../hwsync'
 import { publish, saveImage, saveTable, type Table as DataTable } from '../files'
 import { toggleLoggingFor, useLoggingOf } from '../logging'
 import { useStore } from '../store'
@@ -103,19 +102,27 @@ export function Spectrum() {
   const logging = useLoggingOf('Spectrum')
   const toast = app.toast
   const [tab, setTab] = useState<(typeof TABS)[number]>('Spectrum')
-  const [frame, setFrame] = useState(0)
+  const [snap, setSnap] = useState<Float64Array | null>(null)
   const [cursors, setCursors] = useState<number[]>([1000, 2000])
   const [labels, setLabels] = useState<{ f: number; text: string }[]>([])
   const [dialog, setDialog] = useState<null | { title: string; fields: FormField[]; submitLabel: string; onSubmit: (v: Record<string, string>) => void }>(null)
   const hold = useRef<{ max?: Float64Array; min?: Float64Array; avg?: Float64Array; n: number; ref?: Float64Array }>({ n: 0 })
   const live = s.running && app.running && !!app.device
+  useActive('Spectrum Analyzer', live)
 
-  const real = useHardware()
-  useInterval(() => setFrame((x) => x + 1), 300, live && !real)
-  // A real device: Channel 1 captured at FS; the Demo Device analyses a test signal.
-  const cap = useCapture(real && live ? { channels: [0], rate: FS, samples: N, range: { 0: s.c1Range } } : null)
+  // Channel 1 captured at FS, back to back while running; Single keeps one capture.
+  const req = { channels: [0], rate: FS, samples: N, range: { 0: s.c1Range } }
+  const cap = useCapture(live ? req : null)
+  const single = async (): Promise<void> => {
+    try {
+      const r = await hw!.scope(req)
+      setSnap(r.data[0])
+    } catch (e) {
+      toast('Capture failed', { detail: (e as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') })
+    }
+  }
 
-  const time = useMemo(() => (real ? (cap?.data[0] ?? new Float64Array(N)) : testSignal(N, FS, (frame * 0.37) % 1)), [real, cap, frame])
+  const time = useMemo(() => (live ? cap?.data[0] : snap) ?? snap ?? new Float64Array(N), [live, cap, snap])
   const spec = useMemo(() => analyze(time, FS, s.window, s.beta), [time, s.window, s.beta])
   const m = useMemo(() => metrics(spec), [spec])
 
@@ -200,7 +207,7 @@ export function Spectrum() {
   const bar = (
     <PageBar title="Spectrum Analyzer" status={<StatusDot state={live ? 'READY' : 'QUEUED'} label={live ? 'Running' : 'Stopped'} />}>
       <Switch aria-label="Algorithm" value={s.algorithm} options={['FFT', 'CZT'] as const} onChange={(algorithm) => s.set({ algorithm })} />
-      <Button size="small" type="secondary" prefix={<StepForward size={16} />} onClick={() => { if (!app.device) return toast('No device connected', { detail: 'Connect a device, then press Single.' }); s.set({ running: false }); setFrame(frame + 1) }}>
+      <Button size="small" type="secondary" prefix={<StepForward size={16} />} onClick={() => { if (!app.device) return toast('No device connected', { detail: 'Connect a device, then press Single.' }); s.set({ running: false }); void single() }}>
         Single
       </Button>
       <Button size="small" prefix={live ? <Square size={16} /> : <Play size={16} />} onClick={run} tooltipKeys={['Space']}>

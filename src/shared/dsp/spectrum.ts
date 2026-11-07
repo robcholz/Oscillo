@@ -151,17 +151,3 @@ export function metrics(s: Spectrum, harmonics = 5): Metrics {
     sfdr: 10 * Math.log10(pf / maxHarm)
   }
 }
-
-/** The demo input: 1 kHz, 1 V peak sine with small harmonics and noise. */
-export function testSignal(n: number, fs: number, seed = Math.random()): Float64Array {
-  const v = new Float64Array(n)
-  const ph = seed * 2 * Math.PI
-  const h = [0, 1, 0.00087, 0.00045, 0.00024]
-  for (let i = 0; i < n; i++) {
-    const t = i / fs
-    let x = 0
-    for (let k = 1; k < h.length; k++) x += h[k] * Math.sin(2 * Math.PI * 1000 * k * t + ph * k)
-    v[i] = x + (Math.random() - 0.5) * 0.0012
-  }
-  return v
-}
