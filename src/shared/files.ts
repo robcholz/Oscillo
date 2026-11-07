@@ -35,7 +35,7 @@ export interface FilesApi {
   reveal(path: string): Promise<void>
   /** The window as PNG bytes. */
   capture(): Promise<Uint8Array>
-  /** Documents/Oscillo. */
+  /** Application Support/Oscillo. */
   dataDir(): Promise<string>
   /** App version, Electron version and the executable path. */
   version(): Promise<{ app: string; electron: string; exe: string }>

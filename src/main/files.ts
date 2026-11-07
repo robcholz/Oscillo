@@ -8,7 +8,7 @@ import { FILES, type Filter } from '../shared/files'
 /** Where releases and issues live. */
 export const REPO = 'robcholz/Oscillo'
 
-const dataDir = (): string => join(app.getPath('documents'), 'Oscillo')
+const dataDir = (): string => join(app.getPath('userData'))
 const full = (p: string): string => {
   const x = p.replace(/^~(?=\/|\\|$)/, homedir())
   return isAbsolute(x) ? x : resolve(dataDir(), x)

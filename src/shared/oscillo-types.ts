@@ -111,7 +111,7 @@ export const OSCILLO_DTS = `declare module "oscillo" {
   /** Waits ms milliseconds. */
   export function wait(ms: number): Promise<void>;
 
-  /** A text file in Documents/Oscillo. */
+  /** A text file in Application Support/Oscillo. */
   export class File {
     constructor(name: string);
     readonly path: string;

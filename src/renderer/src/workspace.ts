@@ -94,7 +94,7 @@ export async function saveWorkspace(opts: { as?: boolean; name?: string } = {}):
   const text = JSON.stringify(ws, null, 1)
   try {
     const cur = useRecent.getState().path
-    const path = !opts.as && cur && cur.split(/[\\/]/).pop() === `${name}.oscillo` ? await files.write(cur, text) : await files.save(`${name}.oscillo`, text, [{ name: 'Oscillo Workspace', extensions: ['oscillo'] }], '~/Documents/Oscillo/Workspaces')
+    const path = !opts.as && cur && cur.split(/[\\/]/).pop() === `${name}.oscillo` ? await files.write(cur, text) : await files.save(`${name}.oscillo`, text, [{ name: 'Oscillo Workspace', extensions: ['oscillo'] }], '~/Library/Application Support/Oscillo/Workspaces')
     if (!path) return false
     const saved = path.split(/[\\/]/).pop()!.replace(/\.oscillo$/, '')
     if (saved !== name) app.setWorkspace(saved)
@@ -113,7 +113,7 @@ export async function saveProject(page: PageId): Promise<void> {
   const p = snapshot(false, page)
   if (!Object.keys(p.state).length) return toast('Nothing to save yet', 'This page has no settings of its own. Change one first.')
   try {
-    const path = await files.save(`${page}.oscproj`, JSON.stringify(p, null, 1), [{ name: 'Oscillo Project', extensions: ['oscproj'] }], '~/Documents/Oscillo/Workspaces')
+    const path = await files.save(`${page}.oscproj`, JSON.stringify(p, null, 1), [{ name: 'Oscillo Project', extensions: ['oscproj'] }], '~/Library/Application Support/Oscillo/Workspaces')
     if (path) useStore.getState().toast(`Saved ${path.split(/[\\/]/).pop()}`, { detail: 'Settings of this instrument only.', action: { label: 'Show', run: () => void files?.reveal(path) } })
   } catch (e) {
     toast('Could not save the project', plain(e))
@@ -197,7 +197,7 @@ export function restoreOpened(): void {
 /** Unpacks the workspace into a folder: one settings JSON per instrument and a CSV per capture. */
 export async function extractWorkspace(): Promise<void> {
   if (!files) return
-  const dir = await files.folder('~/Documents/Oscillo')
+  const dir = await files.folder('~/Library/Application Support/Oscillo')
   if (!dir) return
   const ws = snapshot(true)
   const base = `${dir}/${ws.name}`

@@ -10,7 +10,7 @@ import type { WaveRequest } from '../shared/hw'
 
 export interface ApiContext {
   hw: Hardware
-  /** Where File writes, e.g. ~/Documents/Oscillo. */
+  /** Where File writes, e.g. ~/Library/Application Support/Oscillo. */
   dataDir: string
   apply: (a: ScriptApply) => void
   /** Called when a script writes a file. */
