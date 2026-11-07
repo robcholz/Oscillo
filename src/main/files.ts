@@ -62,7 +62,7 @@ export function registerFiles(): void {
   ipcMain.handle(FILES.release, async () => {
     try {
       const r = await net.fetch(`https://api.github.com/repos/${REPO}/releases/latest`, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Oscillo' } })
-      if (r.status === 404) return { error: 'No releases are published yet.' }
+      if (r.status === 404) return { error: `No public releases found on github.com/${REPO}.` }
       if (!r.ok) return { error: `GitHub answered ${r.status}.` }
       const j = (await r.json()) as { tag_name: string; html_url: string }
       return { tag: j.tag_name, url: j.html_url }
