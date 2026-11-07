@@ -8,14 +8,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)"
-      - name: Try actool variants
+      - name: Bisect icon.json
+        shell: python3 {0}
         run: |
-          base=(--output-format human-readable-text --notices --warnings --enable-on-demand-resources NO --development-region en --target-device mac --minimum-deployment-target 26.0 --platform macosx --app-icon Icon)
-          run() { name=$1; shift; d=$(mktemp -d); cp -R build/Oscillo.icon "$d/Icon.icon"; mkdir "$d/out"
-            if [ -n "$JSON" ]; then echo "$JSON" > "$d/Icon.icon/icon.json"; fi
-            echo "=== $name"; xcrun actool "$d/Icon.icon" --compile "$d/out" --output-partial-info-plist "$d/out/p.plist" "${base[@]}" "$@" 2>&1 | grep -E "error|warning|nil" | head -3; ls "$d/out"; }
-          run "builder args" --include-all-app-icons --accent-color AccentColor
-          run "no accent" --include-all-app-icons
-          run "plain"
-          JSON='{"fill":"automatic","groups":[{"layers":[{"image-name":"trace.svg","name":"trace"}]}],"supported-platforms":{"circles":["watchOS"],"squares":"shared"}}' run "minimal json, builder args" --include-all-app-icons --accent-color AccentColor
-          JSON='{"fill":"automatic","groups":[{"layers":[{"image-name":"trace.svg","name":"trace"}]}],"supported-platforms":{"circles":["watchOS"],"squares":"shared"}}' run "minimal json, plain"
+          import json, copy, subprocess, tempfile, shutil, os
+          base = json.load(open('build/Oscillo.icon/icon.json'))
+          def strip_layers(j, key):
+              for g in j['groups']:
+                  for l in g['layers']: l.pop(key, None)
+              return j
+          def no_tinted(j):
+              for g in j['groups']:
+                  for l in g['layers']:
+                      for k in ('fill-specializations','opacity-specializations'):
+                          l[k] = [s for s in l.get(k, []) if s.get('appearance') != 'tinted']
+              j['fill-specializations'] = [s for s in j['fill-specializations'] if s.get('appearance') != 'tinted']
+              return j
+          variants = {
+            'full': lambda j: j,
+            'no color-space': lambda j: (j.pop('color-space-for-untagged-svg-colors'), j)[1],
+            'no top fill-spec': lambda j: (j.pop('fill-specializations'), j)[1],
+            'no layer fill-spec': lambda j: strip_layers(j, 'fill-specializations'),
+            'no layer opacity-spec': lambda j: strip_layers(j, 'opacity-specializations'),
+            'no layer position': lambda j: strip_layers(j, 'position'),
+            'no layer glass': lambda j: strip_layers(j, 'glass'),
+            'no tinted entries': no_tinted,
+            'no group shadow/translucency': lambda j: ([ (g.pop('shadow'), g.pop('translucency')) for g in j['groups']], j)[1],
+          }
+          for name, f in variants.items():
+              d = tempfile.mkdtemp(); shutil.copytree('build/Oscillo.icon', f'{d}/Icon.icon'); os.mkdir(f'{d}/out')
+              json.dump(f(copy.deepcopy(base)), open(f'{d}/Icon.icon/icon.json', 'w'))
+              r = subprocess.run(['xcrun','actool',f'{d}/Icon.icon','--compile',f'{d}/out','--output-partial-info-plist',f'{d}/out/p.plist','--app-icon','Icon','--target-device','mac','--platform','macosx','--minimum-deployment-target','26.0'], capture_output=True, text=True)
+              ok = os.path.exists(f'{d}/out/Assets.car')
+              print(f'=== {name}: {"OK" if ok else "FAIL"}')
