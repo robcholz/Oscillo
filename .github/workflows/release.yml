@@ -1,8 +1,11 @@
 name: Release
+# Publishes a release when main reaches a package.json version that has no tag yet (bump the
+# version in a PR and merge it), or when a v* tag is pushed. Run by hand to get a dmg from any
+# branch without publishing anything.
 on:
   push:
+    branches: [main]
     tags: ['v*']
-  # Run by hand to get a dmg from any branch without publishing a release.
   workflow_dispatch:
 concurrency:
   group: release-${{ github.ref }}
@@ -10,7 +13,26 @@ concurrency:
 permissions:
   contents: write
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      publish: ${{ steps.v.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          tag="v$(node -p "require('./package.json').version")"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = tag ]; then publish=true
+          elif [ "$GITHUB_EVENT_NAME" = push ] && [ -z "$(git ls-remote --tags origin "refs/tags/$tag")" ]; then publish=true
+          else publish=false; fi
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "$tag, publish=$publish"
   mac:
+    needs: version
+    # A push to main without a new version has nothing to release.
+    if: needs.version.outputs.publish == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     timeout-minutes: 45
     steps:
@@ -54,11 +76,13 @@ jobs:
           if-no-files-found: error
       # Settings > Check for Updates reads the latest release and links to its dmg.
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: needs.version.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/*.dmg \
-            --title "Oscillo ${GITHUB_REF_NAME#v}" \
-            --generate-notes \
-            --verify-tag
+          # From main this also creates the tag, on the commit that was built.
+          gh release create "$TAG" dist/*.dmg \
+            --title "Oscillo ${TAG#v}" \
+            --target "$GITHUB_SHA" \
+            --generate-notes
