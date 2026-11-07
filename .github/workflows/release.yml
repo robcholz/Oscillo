@@ -69,6 +69,11 @@ jobs:
           test -f "$app/Contents/Frameworks/dwf.framework/dwf" || { echo "::error::dwf.framework is missing from the app"; exit 1; }
           icon=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIconFile" "$app/Contents/Info.plist")
           test -f "$app/Contents/Resources/${icon%.icns}.icns" || { echo "::error::App icon $icon is missing"; exit 1; }
+          # The trimmed bundle still type-checks scripts and loads the SDK, thinned to one architecture.
+          echo "dwf.framework: $(lipo -archs "$app/Contents/Frameworks/dwf.framework/dwf")"
+          ELECTRON_RUN_AS_NODE=1 "$app/Contents/MacOS/Oscillo" scripts/check-app.cjs "$app"
+          du -sh "$app"
+          ls -l dist/*.dmg
       - uses: actions/upload-artifact@v4
         with:
           name: Oscillo-mac

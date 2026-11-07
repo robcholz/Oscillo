@@ -11,6 +11,21 @@ files:
   - out/**/*
   - package.json
   - build/icon.png
+  # Script's type checker needs typescript.js, not the compiler CLI, language server or translated
+  # messages (20 MB down to 9 MB). Its .d.ts files go to Resources (see extraResources).
+  - '!node_modules/typescript/bin/**'
+  - '!node_modules/typescript/lib/{_tsc,_tsserver,_typingsInstaller,tsc,tsserver,tsserverlibrary,typingsInstaller,watchGuard,cancellationToken}.js'
+  - '!node_modules/typescript/lib/{cs,de,es,fr,it,ja,ko,pl,pt-br,ru,tr,zh-cn,zh-tw}/**'
+# electron-builder drops every .d.ts from node_modules, so Script's type checker gets TypeScript's
+# standard library from here (src/main/script-compile.ts).
+extraResources:
+  - from: node_modules/typescript/lib
+    to: typescript
+    filter: ['lib.*.d.ts', '!lib.{dom,webworker,scripthost}*.d.ts']
+# Thins the WaveForms SDK to the build's architecture.
+afterPack: scripts/after-pack.cjs
+# Recompresses the dmg with LZMA.
+artifactBuildCompleted: scripts/after-dmg.cjs
 mac:
   category: public.app-category.developer-tools
   target: dmg
@@ -20,6 +35,8 @@ mac:
   extraFiles:
     - from: libs/dwf/macos/dwf.framework
       to: Frameworks/dwf.framework
+      # Adept's CoolRunner CPLD maps (9 MB) are for programming CPLDs, which the SDK never does.
+      filter: ['**/*', '!**/digilent/adept/data/{xbr,xpla3}/**']
 # Double-clicking a workspace or project in Finder opens it in Oscillo.
 fileAssociations:
   - ext: oscillo
@@ -30,3 +47,5 @@ fileAssociations:
     role: Editor
 dmg:
   artifactName: Oscillo-${version}.${ext}
+  # The blockmap is for auto-update, which Oscillo doesn't use, and after-dmg.cjs rewrites the dmg.
+  writeUpdateInfo: false
