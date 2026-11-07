@@ -28,6 +28,10 @@ afterPack: scripts/after-pack.cjs
 artifactBuildCompleted: scripts/after-dmg.cjs
 mac:
   category: public.app-category.developer-tools
+  # Layered Icon Composer icon so macOS 26 can render the Default, Dark, Clear and Tinted
+  # appearances. Building it needs Xcode 26 (actool); electron-builder also derives the
+  # icon.icns that older macOS versions use from it.
+  icon: build/Oscillo.icon
   target: dmg
   electronLanguages: [en]
   identity: null
