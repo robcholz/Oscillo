@@ -1,0 +1,21 @@
+name: icon-debug (temporary)
+on:
+  push:
+    branches: [claude/tinted-icon]
+jobs:
+  actool:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)"
+      - name: Try actool variants
+        run: |
+          base=(--output-format human-readable-text --notices --warnings --enable-on-demand-resources NO --development-region en --target-device mac --minimum-deployment-target 26.0 --platform macosx --app-icon Icon)
+          run() { name=$1; shift; d=$(mktemp -d); cp -R build/Oscillo.icon "$d/Icon.icon"; mkdir "$d/out"
+            if [ -n "$JSON" ]; then echo "$JSON" > "$d/Icon.icon/icon.json"; fi
+            echo "=== $name"; xcrun actool "$d/Icon.icon" --compile "$d/out" --output-partial-info-plist "$d/out/p.plist" "${base[@]}" "$@" 2>&1 | grep -E "error|warning|nil" | head -3; ls "$d/out"; }
+          run "builder args" --include-all-app-icons --accent-color AccentColor
+          run "no accent" --include-all-app-icons
+          run "plain"
+          JSON='{"fill":"automatic","groups":[{"layers":[{"image-name":"trace.svg","name":"trace"}]}],"supported-platforms":{"circles":["watchOS"],"squares":"shared"}}' run "minimal json, builder args" --include-all-app-icons --accent-color AccentColor
+          JSON='{"fill":"automatic","groups":[{"layers":[{"image-name":"trace.svg","name":"trace"}]}],"supported-platforms":{"circles":["watchOS"],"squares":"shared"}}' run "minimal json, plain"
