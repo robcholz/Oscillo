@@ -39,7 +39,7 @@ export function Modal({ open, onClose, title, description, children, actions, on
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-[var(--overlay)]" />
         <Dialog.Content style={{ width }}
-          className="fixed left-1/2 top-[120px] z-50 max-w-[calc(100%-32px)] -translate-x-1/2 overflow-hidden rounded-medium bg-background-100 text-gray-1000 shadow-modal outline-none"
+          className="fixed left-1/2 top-1/2 z-50 flex max-h-[calc(100%-32px)] max-w-[calc(100%-32px)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-y-auto rounded-medium bg-background-100 text-gray-1000 shadow-modal outline-none"
           onEscapeKeyDown={(e) => onEscape?.() && e.preventDefault()}
         >
           {onSubmit ? (

@@ -1,5 +1,7 @@
 // Type-checks Script's TypeScript against the Oscillo API, and compiles it with a line hook before
 // every statement (for breakpoints, stepping and the Variables table).
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import ts from 'typescript'
 import { OSCILLO_DTS } from '../shared/oscillo-types'
 import type { Problem } from '../shared/script'
@@ -16,6 +18,12 @@ const OPTIONS: ts.CompilerOptions = {
   skipLibCheck: true
 }
 
+// electron-builder drops every .d.ts from node_modules, so the packaged app ships TypeScript's
+// standard library typings in Resources/typescript (see electron-builder.yml).
+const resources = (process as { resourcesPath?: string }).resourcesPath
+const PACKAGED_LIB = resources ? join(resources, 'typescript') : undefined
+const LIB_DIR = PACKAGED_LIB && existsSync(PACKAGED_LIB) ? PACKAGED_LIB : undefined
+
 function distance(a: string, b: string): number {
   const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)])
   for (let j = 1; j <= b.length; j++) d[0][j] = j
@@ -30,6 +38,10 @@ export function check(files: Record<string, string>, file: string): Problem[] {
   for (const [n, code] of Object.entries(files)) if (n.endsWith('.ts') && !n.endsWith('.d.ts')) virt.set(ROOT + n, code)
   virt.set(ROOT + 'oscillo.d.ts', OSCILLO_DTS)
   const host = ts.createCompilerHost(OPTIONS)
+  if (LIB_DIR) {
+    host.getDefaultLibLocation = () => LIB_DIR
+    host.getDefaultLibFileName = (o) => join(LIB_DIR, ts.getDefaultLibFileName(o))
+  }
   const getSourceFile = host.getSourceFile
   host.getSourceFile = (name, lang, onError, create) => (virt.has(name) ? ts.createSourceFile(name, virt.get(name)!, lang) : getSourceFile(name, lang, onError, create))
   const fileExists = host.fileExists

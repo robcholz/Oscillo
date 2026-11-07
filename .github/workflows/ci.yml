@@ -60,3 +60,7 @@ jobs:
           # The layered icon (Default, Dark, Clear, Tinted on macOS 26) lives in Assets.car.
           [ "$(/usr/libexec/PlistBuddy -c "Print :CFBundleIconName" "$app/Contents/Info.plist")" = Icon ] || { echo "::error::CFBundleIconName is not set"; exit 1; }
           test -f "$app/Contents/Resources/Assets.car" || { echo "::error::Assets.car is missing"; exit 1; }
+          # The trimmed bundle still type-checks scripts and loads the SDK, thinned to one architecture.
+          echo "dwf.framework: $(lipo -archs "$app/Contents/Frameworks/dwf.framework/dwf")"
+          ELECTRON_RUN_AS_NODE=1 "$app/Contents/MacOS/Oscillo" scripts/check-app.cjs "$app"
+          du -sh "$app"

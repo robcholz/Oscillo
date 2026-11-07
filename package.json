@@ -1,7 +1,7 @@
 {
   "name": "oscillo",
   "productName": "Oscillo",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A test and measurement app for Digilent instruments on macOS.",
   "private": true,
   "main": "./out/main/index.js",
@@ -18,6 +18,7 @@
     "screenshot": "electron-vite build && xvfb-run -a node scripts/screenshot.mjs screenshots"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@oscillo/dwf": "file:libs/dwf",
     "@robcholz/geist": "file:geist",
     "@tailwindcss/vite": "^4.3.4",
@@ -40,7 +41,6 @@
     "zustand": "^5.0.16"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.32.2",
     "koffi": "^3.3.7",
     "typescript": "^5.9.3"
   }
