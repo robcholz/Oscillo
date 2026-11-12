@@ -58,7 +58,7 @@ export function toastType(title: string): ToastItem['type'] {
 export const useStore = create<State>()(
   persist(
     (set, get) => ({
-      page: 'scope',
+      page: 'welcome',
       theme: 'system',
       sidebarCollapsed: null,
       device: 'DEMO',
