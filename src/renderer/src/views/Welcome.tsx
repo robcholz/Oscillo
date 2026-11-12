@@ -1,23 +1,14 @@
-// Welcome (board: Welcome). Instrument launcher and recent workspaces.
-import { Banner, Button, FormModal, Material, Pill, Table } from '@robcholz/geist'
-import { FolderOpen, Info, Plus, TriangleAlert } from 'lucide-react'
+// Welcome (board: Welcome). The page Oscillo opens on: a Pixel Blast field behind the title, the workspace
+// actions and a Recent Workspaces card, all on one screen that never scrolls. Short windows (the 960 x 600
+// minimum) drop the icon and descriptions so the page still fits.
+import { Button, FormModal, Kbd, Material, StatusDot } from '@robcholz/geist'
+import { ChevronRight, Folder, FolderOpen, Plus } from 'lucide-react'
 import { useState } from 'react'
-import { PageBar, ScrollPage } from '../components/Page'
+import icon from '../assets/oscillo-icon.png'
+import { PixelBlast } from '../components/PixelBlast'
 import { useDevice } from '../devices'
-import { pageById, type PageId } from '../routes'
 import { useStore } from '../store'
 import { newWorkspace, openWorkspace, useRecent } from '../workspace'
-
-const LAUNCH: { id: PageId; text: string }[] = [
-  { id: 'scope', text: 'Oscilloscope with triggers, math and measurements' },
-  { id: 'wavegen', text: 'Function, custom, sweep and modulated signals' },
-  { id: 'supplies', text: 'Positive and negative rails' },
-  { id: 'logic', text: 'Digital capture with SPI, I2C, UART and CAN decoding' },
-  { id: 'patterns', text: 'Clocks, pulses, counters and custom data' },
-  { id: 'spectrum', text: 'FFT and CZT with SNR, THD and ENOB' },
-  { id: 'network', text: 'Bode, Nyquist and Nichols' },
-  { id: 'script', text: 'Automate any instrument in TypeScript' }
-]
 
 const when = (at: number): string => {
   const d = new Date(at)
@@ -30,81 +21,71 @@ const home = (p: string): string => p.replace(/^\/(Users|home)\/[^/]+/, '~')
 
 export function Welcome() {
   const s = useStore()
-  const [filter, setFilter] = useState<'all' | 'device'>('all')
-  const [banner, setBanner] = useState(true)
   const [create, setCreate] = useState(false)
   const dev = useDevice()
   const recent = useRecent((r) => r.recent)
-  const rows = recent
-    .filter((r) => (filter === 'device' ? !!dev && r.device === dev.name : true))
-    .map((r) => ({ n: r.name, p: home(r.path.replace(/[\\/][^\\/]+$/, '')), d: r.device, m: when(r.at), path: r.path }))
 
   return (
-    <ScrollPage
-      className="p-0!"
-      bar={
-        <PageBar title="Welcome">
-          <Button size="small" type="secondary" prefix={<FolderOpen size={16} />} onClick={() => void openWorkspace()}>
-            Open Workspace
-          </Button>
-          <Button size="small" prefix={<Plus size={16} />} onClick={() => setCreate(true)}>
+    <section aria-labelledby="welcome-title" className="relative isolate flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden px-4 py-6 *:flex-none">
+      <PixelBlast className="welcome-blast absolute inset-0 -z-10" />
+      <div className="flex flex-col items-center text-center">
+        <Button size="small" type="secondary" shape="rounded" suffix={<ChevronRight size={16} />} onClick={() => s.go('device')} className="mb-6 [@media(max-height:780px)]:mb-4">
+          <span className="inline-flex items-center gap-2">
+            <StatusDot state={dev ? 'READY' : 'ERROR'} />
+            {dev ? dev.name : 'No device'}
+            <span className="text-gray-900">{dev ? 'Connected' : 'Connect'}</span>
+          </span>
+        </Button>
+        <img src={icon} width={64} height={64} alt="" className="mb-4 block [@media(max-height:780px)]:hidden" draggable={false} />
+        <h1 id="welcome-title" className="m-0 text-5xl leading-14 font-semibold tracking-[-2.88px] [@media(max-height:780px)]:text-[32px] [@media(max-height:780px)]:leading-10 [@media(max-height:780px)]:tracking-[-1.28px]">
+          Oscillo
+        </h1>
+        <p className="m-0 mt-2 text-base leading-6 text-gray-900">Measure, generate and decode signals with your Digilent instrument.</p>
+        <div className="mt-7 flex flex-wrap justify-center gap-3 [@media(max-height:780px)]:mt-5">
+          <Button prefix={<Plus size={16} />} onClick={() => setCreate(true)}>
             New Workspace
           </Button>
-        </PageBar>
-      }
-    >
-      {banner &&
-        (dev ? (
-          <Banner icon={<Info size={16} />} onClose={() => setBanner(false)} action={<Button size="small" type="secondary" onClick={() => s.go('scope')}>Open Scope</Button>}>
-            {dev.name} is connected and ready.
-          </Banner>
-        ) : (
-          <Banner type="warning" icon={<TriangleAlert size={16} />} onClose={() => setBanner(false)} action={<Button size="small" type="secondary" onClick={() => s.go('device')}>Connect</Button>}>
-            No device connected. Connect one, or use the Demo Device to try every instrument.
-          </Banner>
-        ))}
-      <div className="flex flex-col gap-6 p-4">
-        <h2 className="m-0 text-xl font-semibold leading-[26px] tracking-[-0.4px]">Open an Instrument</h2>
-        <Material className="grid grid-cols-[repeat(auto-fit,minmax(max(180px,25%),1fr))] overflow-hidden">
-          {LAUNCH.map(({ id, text }) => {
-            const p = pageById[id]
-            const Icon = p.icon
-            return (
-              <button key={id} type="button" onClick={() => s.go(id)} className="flex items-start gap-3 p-6 text-left shadow-[inset_-1px_-1px_0_var(--gray-alpha-400)] transition-colors hover:bg-gray-alpha-100">
-                <Icon size={20} />
-                <span className="flex flex-col gap-1">
-                  <span className="text-sm font-semibold leading-5 tracking-[-0.28px]">{p.label}</span>
-                  <span className="text-[13px] leading-[18px] text-gray-900">{text}</span>
-                </span>
-              </button>
-            )
-          })}
-        </Material>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="m-0 text-xl font-semibold leading-[26px] tracking-[-0.4px]">Recent Workspaces</h2>
-          <div className="flex gap-2">
-            <Pill size="small" active={filter === 'all'} onClick={() => setFilter('all')}>
-              All
-            </Pill>
-            <Pill size="small" active={filter === 'device'} onClick={() => setFilter('device')}>
-              This Device
-            </Pill>
-          </div>
+          <Button type="secondary" prefix={<FolderOpen size={16} />} onClick={() => void openWorkspace()}>
+            Open Workspace
+          </Button>
         </div>
-        <Table
-          caption="Recent workspaces"
-          columns={[
-            { key: 'n', title: 'Name' },
-            { key: 'p', title: 'Location' },
-            { key: 'd', title: 'Device' },
-            { key: 'm', title: 'Modified', align: 'right' }
-          ]}
-          rows={rows}
-          rowKey={(r) => r.path}
-          onRowClick={(r) => void openWorkspace(r.path)}
-        />
-        {rows.length === 0 && <p className="m-0 text-sm text-gray-900">{filter === 'device' ? 'No workspaces were saved with this device yet.' : 'Workspaces you save or open show here. Press ⌘S to save this one.'}</p>}
       </div>
+
+      <Material className="mt-8 w-full max-w-[560px] overflow-hidden [@media(max-height:780px)]:mt-5">
+        <h2 className="m-0 flex h-11 items-center px-4 text-sm leading-5 font-semibold tracking-[-0.28px] shadow-[inset_0_-1px_0_var(--gray-alpha-400)]">Recent Workspaces</h2>
+        {recent.length > 0 ? (
+          <ul className="m-0 flex max-h-[272px] list-none flex-col overflow-y-auto p-1.5 [@media(max-height:780px)]:max-h-[188px]">
+            {recent.map((r) => (
+              <li key={r.path}>
+                <button
+                  type="button"
+                  title={home(r.path)}
+                  onClick={() => void openWorkspace(r.path)}
+                  className="flex h-[52px] w-full min-w-0 items-center gap-3 rounded-small px-2.5 text-left outline-none hover:bg-gray-alpha-100 kbd-focus:shadow-focus-ring [@media(max-height:780px)]:h-11"
+                >
+                  <span className="flex size-8 flex-none items-center justify-center rounded-small text-gray-1000 shadow-[inset_0_0_0_1px_var(--gray-alpha-400)]">
+                    <Folder size={16} />
+                  </span>
+                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span className="truncate text-sm leading-5 font-medium">{r.name}</span>
+                    {r.device && <span className="truncate text-[13px] leading-4 text-gray-900 [@media(max-height:780px)]:hidden">{r.device}</span>}
+                  </span>
+                  <span className="flex-none text-xs leading-4 text-gray-900">{when(r.at)}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="flex flex-col items-center gap-1 px-4 py-7 text-center">
+            <span className="text-sm leading-5 font-medium">No recent workspaces</span>
+            <span className="text-[13px] leading-[18px] text-gray-900">Workspaces you save or open show here. Press ⌘S to save this one.</span>
+          </div>
+        )}
+      </Material>
+
+      <p className="m-0 mt-5 flex items-center gap-1.5 text-[13px] leading-4 text-gray-900 [@media(max-height:780px)]:mt-3">
+        Press <Kbd small meta keys={['K']} /> to find any instrument or setting
+      </p>
       <FormModal
         open={create}
         onClose={() => setCreate(false)}
@@ -114,6 +95,6 @@ export function Welcome() {
         submitLabel="Create Workspace"
         onSubmit={(v) => newWorkspace(v.n.trim())}
       />
-    </ScrollPage>
+    </section>
   )
 }

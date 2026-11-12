@@ -16,7 +16,6 @@ const SECTIONS = [
   { id: 'appearance', label: 'Appearance' },
   { id: 'plots', label: 'Plots' },
   { id: 'region', label: 'Language and Region' },
-  { id: 'startup', label: 'Startup' },
   { id: 'updates', label: 'Updates' },
   { id: 'shortcuts', label: 'Keyboard Shortcuts' },
   { id: 'cli', label: 'Command Line' },
@@ -196,11 +195,6 @@ export function Settings() {
               <OptionRow label="Decimal Symbol" description="For readouts and plot labels. Exported files have their own setting on the Export page.">{select('Decimal Symbol', p.decimal, ['Locale', 'Point', 'Comma'], (v) => p.set({ decimal: v as typeof p.decimal }))}</OptionRow>
             </Section>
 
-            <Section id="startup" title="Startup">
-              <OptionRow label="On Start" description="Where Oscillo opens. Instrument settings are always kept.">
-                {select('On Start', p.onStart, ['Open Last Workspace', 'Open Welcome'], (onStart) => p.set({ onStart }))}
-              </OptionRow>
-            </Section>
 
             <Section id="updates" title="Updates">
               <OptionRow label="Check Automatically" description="Look for a new version once a day.">

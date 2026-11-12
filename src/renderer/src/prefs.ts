@@ -12,7 +12,6 @@ export const PREF_DEFAULTS = {
   drag: 'Pan' as 'Pan' | 'Select Region',
   hover: true,
   decimal: 'Locale' as 'Locale' | 'Point' | 'Comma',
-  onStart: 'Open Last Workspace',
   autoUpdate: true
 }
 export type Prefs = typeof PREF_DEFAULTS

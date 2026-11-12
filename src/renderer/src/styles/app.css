@@ -63,3 +63,14 @@ html.wf-resizing * {
   cursor: col-resize !important;
   user-select: none !important;
 }
+
+/* Welcome: the Pixel Blast field around the hero. Colours are Finn's (slate pixels, white where the
+   clouds are densest); light mode darkens the dense areas instead. The mask keeps the title clear. */
+.welcome-blast {
+  --blast-color: #94a3b8;
+  --blast-accent: #ffffff;
+  mask-image: radial-gradient(ellipse 460px 400px at 50% 50%, transparent 60%, #000 100%);
+}
+[data-theme='light'] .welcome-blast {
+  --blast-accent: #334155;
+}

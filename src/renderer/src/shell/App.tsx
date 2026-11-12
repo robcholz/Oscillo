@@ -20,7 +20,8 @@ export function App() {
     startHwSync()
     restoreOpened()
     void checkAtLaunch()
-    if (usePrefs.getState().onStart === 'Open Welcome' && !sessionStorage.getItem('oscillo-started')) useStore.getState().go('welcome')
+    // Every launch opens on Welcome. Reloads (opening a workspace reloads the window) keep the page.
+    if (!sessionStorage.getItem('oscillo-started')) useStore.getState().go('welcome')
     sessionStorage.setItem('oscillo-started', '1')
     return window.oscillo?.files.onOpened((p) => void openWorkspace(p))
   }, [])
